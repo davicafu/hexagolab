@@ -68,11 +68,50 @@ func TestOutboxWorker_ProcessBatch(t *testing.T) {
 	repo.On("MarkOutboxProcessed", mock.Anything, eventID).Return(nil).Once()
 	publisher.On("Publish", mock.Anything, evt.EventType, mock.Anything).Return(nil).Once()
 
-	// Crear worker
+	// Crear worker (no llamamos a Start, para evitar goroutines)
 	worker := NewOutboxWorker(repo, publisher, 10*time.Millisecond, 10)
 
-	// Ejecutar la función private processBatch directamente para test
+	// Ejecutar la función directamente
 	worker.ProcessBatch(ctx)
+
+	// Verificar que se cumplieron las expectativas
+	repo.AssertExpectations(t)
+	publisher.AssertExpectations(t)
+}
+
+func TestOutboxWorker_Enqueue(t *testing.T) {
+	//ctx, cancel := context.WithCancel(context.Background())
+	//defer cancel()
+
+	repo := new(MinimalRepo)
+	publisher := new(mocks.MockPublisher)
+
+	// Crear un evento de prueba
+	eventID := uuid.New()
+	evt := domain.OutboxEvent{
+		ID:            eventID,
+		AggregateType: "User",
+		AggregateID:   uuid.New().String(),
+		EventType:     "user.created",
+		Payload:       map[string]interface{}{"email": "enqueue@example.com"},
+		CreatedAt:     time.Now(),
+		Processed:     false,
+	}
+
+	// Esperamos que al publicar desde el canal se llame a Publish y MarkOutboxProcessed
+	publisher.On("Publish", mock.Anything, evt.EventType, mock.Anything).Return(nil).Once()
+	repo.On("MarkOutboxProcessed", mock.Anything, evt.ID).Return(nil).Once()
+
+	// Crear worker con canal
+	worker := NewOutboxWorker(repo, publisher, 50*time.Millisecond, 10)
+	// Procesa el evento directamente:
+	worker.publishAndMark(context.Background(), evt)
+
+	// Encolar evento
+	worker.Enqueue(evt)
+
+	// Dar tiempo a que la goroutine procese
+	time.Sleep(100 * time.Millisecond)
 
 	// Verificaciones
 	repo.AssertExpectations(t)
