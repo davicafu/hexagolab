@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -9,13 +10,14 @@ import (
 	"github.com/davicafu/hexagolab/tests/mocks"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 )
 
 func TestCreateUser_Success(t *testing.T) {
 	repo := mocks.NewInMemoryUserRepo()
 	cache := &mocks.DummyCache{}
 	events := &mocks.DummyPublisher{}
-	service := NewUserService(repo, cache, events)
+	service := NewUserService(repo, cache, events, zap.NewNop())
 
 	user, err := service.CreateUser(context.Background(), "test@example.com", "Pepe", time.Date(1990, 5, 10, 0, 0, 0, 0, time.UTC))
 	assert.NoError(t, err)
@@ -33,7 +35,7 @@ func TestCreateUser_AlreadyExists(t *testing.T) {
 	repo := mocks.NewInMemoryUserRepo()
 	cache := &mocks.DummyCache{}
 	events := &mocks.DummyPublisher{}
-	service := NewUserService(repo, cache, events)
+	service := NewUserService(repo, cache, events, zap.NewNop())
 
 	user, _ := service.CreateUser(context.Background(), "dup@example.com", "Juan", time.Now())
 	// Intentar crear de nuevo con el mismo ID usando repo directamente
@@ -52,7 +54,7 @@ func TestGetUser_NotFound(t *testing.T) {
 	repo := mocks.NewInMemoryUserRepo()
 	cache := &mocks.DummyCache{}
 	events := &mocks.DummyPublisher{}
-	service := NewUserService(repo, cache, events)
+	service := NewUserService(repo, cache, events, zap.NewNop())
 
 	_, err := service.GetUser(context.Background(), uuid.New())
 	assert.ErrorIs(t, err, domain.ErrUserNotFound)
@@ -62,7 +64,7 @@ func TestUpdateUser_Success(t *testing.T) {
 	repo := mocks.NewInMemoryUserRepo()
 	cache := &mocks.DummyCache{}
 	events := &mocks.DummyPublisher{}
-	service := NewUserService(repo, cache, events)
+	service := NewUserService(repo, cache, events, zap.NewNop())
 
 	user, _ := service.CreateUser(context.Background(), "update@example.com", "Ana", time.Now())
 	user.Nombre = "Ana Actualizada"
@@ -84,7 +86,7 @@ func TestDeleteUser_Success(t *testing.T) {
 	repo := mocks.NewInMemoryUserRepo()
 	cache := &mocks.DummyCache{}
 	events := &mocks.DummyPublisher{}
-	service := NewUserService(repo, cache, events)
+	service := NewUserService(repo, cache, events, zap.NewNop())
 
 	user, _ := service.CreateUser(context.Background(), "delete@example.com", "Borrar", time.Now())
 
@@ -114,7 +116,7 @@ func TestGetUser_CacheHit(t *testing.T) {
 	cache.SetForTest(domain.CacheKeyByID(id), user) // método de test que inserta directamente
 
 	repo := mocks.NewInMemoryUserRepo()
-	service := NewUserService(repo, cache, nil)
+	service := NewUserService(repo, cache, nil, zap.NewNop())
 
 	u, err := service.GetUser(context.Background(), id)
 	assert.NoError(t, err)
@@ -134,7 +136,7 @@ func TestGetUser_CacheMiss(t *testing.T) {
 	repo.Create(context.Background(), user, domain.OutboxEvent{})
 	cache := mocks.NewDummyCache() // cache vacía
 
-	service := NewUserService(repo, cache, nil)
+	service := NewUserService(repo, cache, nil, zap.NewNop())
 
 	u, _ := service.GetUser(context.Background(), id)
 	assert.NotNil(t, u)
@@ -143,31 +145,26 @@ func TestGetUser_CacheMiss(t *testing.T) {
 
 // ----------------- ListUsers / Search / Filter -----------------
 
-func TestSearchUsersByName(t *testing.T) {
+func TestListUsersByName(t *testing.T) {
 	repo := mocks.NewInMemoryUserRepo()
-	user1 := &domain.User{ID: uuid.New(), Nombre: "Ana"}
-	user2 := &domain.User{ID: uuid.New(), Nombre: "Juan"}
-	repo.Create(context.Background(), user1, domain.OutboxEvent{})
-	repo.Create(context.Background(), user2, domain.OutboxEvent{})
+	_ = repo.Create(context.Background(), &domain.User{ID: uuid.New(), Nombre: "Ana"}, domain.OutboxEvent{})
+	_ = repo.Create(context.Background(), &domain.User{ID: uuid.New(), Nombre: "Juan"}, domain.OutboxEvent{})
 
-	service := NewUserService(repo, nil, nil)
+	service := NewUserService(repo, nil, nil, zap.NewNop())
 
-	results, err := service.SearchUsersByName(context.Background(), "Ana")
-	assert.NoError(t, err)
-	assert.Len(t, results, 1)
-	assert.Equal(t, "Ana", results[0].Nombre)
-}
+	criteria := domain.CompositeCriteria{
+		Operator: domain.OpAnd,
+		Criterias: []domain.Criteria{
+			domain.NameLikeCriteria{Name: "Ana"},
+		},
+	}
 
-func TestFilterUsers(t *testing.T) {
-	repo := mocks.NewInMemoryUserRepo()
-	user1 := &domain.User{ID: uuid.New(), Nombre: "Ana", Email: "ana@example.com"}
-	user2 := &domain.User{ID: uuid.New(), Nombre: "Juan", Email: "juan@example.com"}
-	repo.Create(context.Background(), user1, domain.OutboxEvent{})
-	repo.Create(context.Background(), user2, domain.OutboxEvent{})
-
-	service := NewUserService(repo, nil, nil)
-
-	results, err := service.FilterUsers(context.Background(), 0, 100, "ana@example.com")
+	results, err := service.ListUsers(
+		context.Background(),
+		criteria,
+		domain.OffsetPagination{Limit: 10, Offset: 0},
+		domain.Sort{Field: "created_at", Desc: false},
+	)
 	assert.NoError(t, err)
 	assert.Len(t, results, 1)
 	assert.Equal(t, "Ana", results[0].Nombre)
@@ -177,14 +174,238 @@ func TestListUsers(t *testing.T) {
 	repo := mocks.NewInMemoryUserRepo()
 	cache := &mocks.DummyCache{}
 	events := &mocks.DummyPublisher{}
-	service := NewUserService(repo, cache, events)
+	service := NewUserService(repo, cache, events, zap.NewNop())
 
 	user1, _ := service.CreateUser(context.Background(), "a@example.com", "Ana", time.Now())
 	user2, _ := service.CreateUser(context.Background(), "b@example.com", "Bob", time.Now())
 
-	users, err := service.ListUsers(context.Background(), domain.UserFilter{})
+	criteria := domain.CompositeCriteria{Operator: domain.OpAnd, Criterias: []domain.Criteria{}}
+
+	users, err := service.ListUsers(
+		context.Background(),
+		criteria,
+		domain.OffsetPagination{Limit: 20, Offset: 0},
+		domain.Sort{Field: "created_at", Desc: false},
+	)
 	assert.NoError(t, err)
 	assert.Len(t, users, 2)
 	assert.Contains(t, users, user1)
 	assert.Contains(t, users, user2)
+}
+
+func TestListAdultUsers(t *testing.T) {
+	repo := mocks.NewInMemoryUserRepo()
+	cache := &mocks.DummyCache{}
+	events := &mocks.DummyPublisher{}
+	service := NewUserService(repo, cache, events, zap.NewNop())
+
+	// Crear usuarios de distintas edades
+	// BirthDate calculado para que user1 tenga 20 años y user2 tenga 15 años
+	user1, _ := service.CreateUser(context.Background(), "a@example.com", "Ana", time.Now().AddDate(-20, 0, 0))
+	user2, _ := service.CreateUser(context.Background(), "b@example.com", "Bob", time.Now().AddDate(-15, 0, 0))
+	user3, _ := service.CreateUser(context.Background(), "c@example.com", "Carlos", time.Now().AddDate(-25, 0, 0))
+
+	users, err := service.ListAdultUsers(
+		context.Background(),
+		domain.OffsetPagination{Limit: 10, Offset: 0},
+		domain.Sort{Field: "created_at", Desc: false},
+	)
+	assert.NoError(t, err)
+
+	// Debe devolver solo los usuarios mayores de 18 años
+	assert.Len(t, users, 2)
+	assert.Contains(t, users, user1)
+	assert.Contains(t, users, user3)
+	assert.NotContains(t, users, user2)
+}
+
+func TestListUsers_PaginationOffsetAndSorting(t *testing.T) {
+	repo := mocks.NewInMemoryUserRepo()
+	service := NewUserService(repo, nil, nil, zap.NewNop())
+
+	// Crear 5 usuarios con distintos nombres y emails
+	users := []*domain.User{
+		{ID: uuid.New(), Nombre: "Ana", Email: "ana@example.com", CreatedAt: time.Now().Add(-5 * time.Hour)},
+		{ID: uuid.New(), Nombre: "Bob", Email: "bob@example.com", CreatedAt: time.Now().Add(-4 * time.Hour)},
+		{ID: uuid.New(), Nombre: "Carlos", Email: "carlos@example.com", CreatedAt: time.Now().Add(-3 * time.Hour)},
+		{ID: uuid.New(), Nombre: "Dave", Email: "Dave@example.com", CreatedAt: time.Now().Add(-2 * time.Hour)},
+		{ID: uuid.New(), Nombre: "Eva", Email: "eva@example.com", CreatedAt: time.Now().Add(-1 * time.Hour)},
+	}
+	for _, u := range users {
+		_ = repo.Create(context.Background(), u, domain.OutboxEvent{})
+	}
+
+	criteria := domain.CompositeCriteria{Operator: domain.OpAnd, Criterias: []domain.Criteria{}}
+
+	// --- 1. Paginación: Offset + Limit ---
+	page1, err := service.ListUsers(
+		context.Background(),
+		criteria,
+		domain.OffsetPagination{Limit: 2, Offset: 0},
+		domain.Sort{Field: "nombre", Desc: false},
+	)
+	assert.NoError(t, err)
+	assert.Len(t, page1, 2)
+	assert.Equal(t, "Ana", page1[0].Nombre)
+	assert.Equal(t, "Bob", page1[1].Nombre)
+
+	page2, err := service.ListUsers(
+		context.Background(),
+		criteria,
+		domain.OffsetPagination{Limit: 2, Offset: 2},
+		domain.Sort{Field: "nombre", Desc: false},
+	)
+	assert.NoError(t, err)
+	assert.Len(t, page2, 2)
+	assert.Equal(t, "Carlos", page2[0].Nombre)
+	assert.Equal(t, "Dave", page2[1].Nombre)
+
+	// --- 2. Orden descendente ---
+	descUsers, err := service.ListUsers(
+		context.Background(),
+		criteria,
+		domain.OffsetPagination{Limit: 5, Offset: 0},
+		domain.Sort{Field: "nombre", Desc: true},
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, "Eva", descUsers[0].Nombre)
+	assert.Equal(t, "Dave", descUsers[1].Nombre)
+	assert.Equal(t, "Carlos", descUsers[2].Nombre)
+	assert.Equal(t, "Bob", descUsers[3].Nombre)
+	assert.Equal(t, "Ana", descUsers[4].Nombre)
+
+	// --- 3. Filtro combinado + paginación ---
+	filterCriteria := domain.CompositeCriteria{
+		Operator: domain.OpAnd,
+		Criterias: []domain.Criteria{
+			domain.NameLikeCriteria{Name: "a"}, // Ana, Carlos, Dave, Eva
+		},
+	}
+	filteredPage, err := service.ListUsers(
+		context.Background(),
+		filterCriteria,
+		domain.OffsetPagination{Limit: 2, Offset: 1},
+		domain.Sort{Field: "nombre", Desc: false},
+	)
+	assert.NoError(t, err)
+	assert.Len(t, filteredPage, 2)
+	assert.Equal(t, "Carlos", filteredPage[0].Nombre)
+	assert.Equal(t, "Dave", filteredPage[1].Nombre)
+
+	// --- 4. Offset fuera de rango → array vacío ---
+	outOfRange, err := service.ListUsers(
+		context.Background(),
+		criteria,
+		domain.OffsetPagination{Limit: 2, Offset: 10},
+		domain.Sort{Field: "nombre", Desc: false},
+	)
+	assert.NoError(t, err)
+	assert.Len(t, outOfRange, 0)
+}
+
+func TestListUsers_CursorPagination(t *testing.T) {
+	repo := mocks.NewInMemoryUserRepo()
+	service := NewUserService(repo, nil, nil, zap.NewNop())
+
+	// Crear 5 usuarios con distintos nombres y created_at
+	users := []*domain.User{
+		{ID: uuid.New(), Nombre: "Ana", CreatedAt: time.Now().Add(-5 * time.Hour)},
+		{ID: uuid.New(), Nombre: "Bob", CreatedAt: time.Now().Add(-4 * time.Hour)},
+		{ID: uuid.New(), Nombre: "Carlos", CreatedAt: time.Now().Add(-3 * time.Hour)},
+		{ID: uuid.New(), Nombre: "Dave", CreatedAt: time.Now().Add(-2 * time.Hour)},
+		{ID: uuid.New(), Nombre: "Eva", CreatedAt: time.Now().Add(-1 * time.Hour)},
+	}
+	for _, u := range users {
+		_ = repo.Create(context.Background(), u, domain.OutboxEvent{})
+	}
+
+	criteria := domain.CompositeCriteria{Operator: domain.OpAnd, Criterias: []domain.Criteria{}}
+
+	// Helper para construir cursor compuesto
+	buildCursor := func(u *domain.User, sortField string) string {
+		var val string
+		switch sortField {
+		case "nombre":
+			val = u.Nombre
+		case "email":
+			val = u.Email
+		case "created_at":
+			val = u.CreatedAt.Format(time.RFC3339Nano) // coincide con el mock
+		default:
+			val = u.ID.String()
+		}
+		return fmt.Sprintf("%s|%s", val, u.ID.String())
+	}
+
+	// --- 1. Primer "page" usando cursor vacío ---
+	cursor := ""
+	page1, err := service.ListUsers(
+		context.Background(),
+		criteria,
+		domain.CursorPagination{
+			Limit:     2,
+			Cursor:    cursor,
+			SortField: "created_at",
+			SortDesc:  false,
+		},
+		domain.Sort{Field: "created_at", Desc: false},
+	)
+	assert.NoError(t, err)
+	assert.Len(t, page1, 2)
+	assert.Equal(t, "Ana", page1[0].Nombre)
+	assert.Equal(t, "Bob", page1[1].Nombre)
+
+	// --- 2. Segunda "page" usando cursor del último elemento de la primera ---
+	cursor = buildCursor(page1[len(page1)-1], "created_at")
+	page2, err := service.ListUsers(
+		context.Background(),
+		criteria,
+		domain.CursorPagination{
+			Limit:     2,
+			Cursor:    cursor,
+			SortField: "created_at",
+			SortDesc:  false,
+		},
+		domain.Sort{Field: "created_at", Desc: false},
+	)
+	assert.NoError(t, err)
+	assert.Len(t, page2, 2)
+	assert.Equal(t, "Carlos", page2[0].Nombre)
+	assert.Equal(t, "Dave", page2[1].Nombre)
+
+	// --- 3. Última "page" (menos elementos que limit) ---
+	cursor = buildCursor(page2[len(page2)-1], "created_at")
+	page3, err := service.ListUsers(
+		context.Background(),
+		criteria,
+		domain.CursorPagination{
+			Limit:     2,
+			Cursor:    cursor,
+			SortField: "created_at",
+			SortDesc:  false,
+		},
+		domain.Sort{Field: "created_at", Desc: false},
+	)
+	assert.NoError(t, err)
+	assert.Len(t, page3, 1)
+	assert.Equal(t, "Eva", page3[0].Nombre)
+
+	// --- 4. Orden descendente usando cursor ---
+	cursor = ""
+	descPage, err := service.ListUsers(
+		context.Background(),
+		criteria,
+		domain.CursorPagination{
+			Limit:     3,
+			Cursor:    cursor,
+			SortField: "created_at",
+			SortDesc:  true,
+		},
+		domain.Sort{Field: "created_at", Desc: true},
+	)
+	assert.NoError(t, err)
+	assert.Len(t, descPage, 3)
+	assert.Equal(t, "Eva", descPage[0].Nombre)
+	assert.Equal(t, "Dave", descPage[1].Nombre)
+	assert.Equal(t, "Carlos", descPage[2].Nombre)
 }

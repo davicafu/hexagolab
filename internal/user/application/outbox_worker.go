@@ -3,10 +3,11 @@ package application
 import (
 	"context"
 	"encoding/json"
-	"log"
+
 	"time"
 
 	"github.com/davicafu/hexagolab/internal/user/domain"
+	"go.uber.org/zap"
 )
 
 // OutboxWorker procesa eventos pendientes en la tabla outbox y los publica en Kafka.
@@ -16,15 +17,24 @@ type OutboxWorker struct {
 	interval  time.Duration
 	batchSize int
 	ch        chan domain.OutboxEvent
+	log       *zap.Logger
 }
 
-func NewOutboxWorker(repo domain.UserRepository, publisher domain.EventPublisher, interval time.Duration, batchSize int) *OutboxWorker {
+func NewOutboxWorker(
+	repo domain.UserRepository,
+	publisher domain.EventPublisher,
+	interval time.Duration,
+	batchSize int,
+	log *zap.Logger,
+) *OutboxWorker {
+
 	return &OutboxWorker{
 		repo:      repo,
 		publisher: publisher,
 		interval:  interval,
 		batchSize: batchSize,
-		ch:        make(chan domain.OutboxEvent, 100), // buffer configurable
+		ch:        make(chan domain.OutboxEvent, 100),
+		log:       log,
 	}
 }
 
@@ -40,31 +50,33 @@ func (w *OutboxWorker) Enqueue(evt domain.OutboxEvent) {
 
 func (w *OutboxWorker) Start(ctx context.Context) {
 	go func() {
-		// Loop para consumir el canal en memoria
 		for {
 			select {
 			case <-ctx.Done():
-				log.Println("🛑 Outbox worker detenido (canal en memoria)")
+				w.log.Info("🛑 Outbox worker detenido (canal en memoria)")
 				return
 			case evt := <-w.ch:
-				log.Printf("📥 Procesando evento %s desde canal en memoria", evt.ID)
+				w.log.Info("Procesando evento desde canal en memoria",
+					zap.String("event_id", evt.ID.String()),
+					zap.String("aggregate_type", evt.AggregateType),
+					zap.String("event_type", evt.EventType),
+				)
 				w.publishAndMark(ctx, evt)
 			}
 		}
 	}()
 
 	go func() {
-		// Loop para polling periódico
 		ticker := time.NewTicker(w.interval)
 		defer ticker.Stop()
 
 		for {
 			select {
 			case <-ctx.Done():
-				log.Println("🛑 Outbox worker detenido (polling)")
+				w.log.Info("🛑 Outbox worker detenido (polling)")
 				return
 			case <-ticker.C:
-				log.Println("🔄 Ejecutando polling de outbox")
+				w.log.Info("🔄 Ejecutando polling de outbox")
 				w.ProcessBatch(ctx)
 			}
 		}
@@ -74,7 +86,7 @@ func (w *OutboxWorker) Start(ctx context.Context) {
 func (w *OutboxWorker) ProcessBatch(ctx context.Context) {
 	events, err := w.repo.FetchPendingOutbox(ctx, w.batchSize)
 	if err != nil {
-		log.Printf("⚠️ Error al obtener eventos pendientes: %v", err)
+		w.log.Warn("⚠️ Error al obtener eventos pendientes", zap.Error(err))
 		return
 	}
 	for _, evt := range events {
@@ -98,13 +110,23 @@ func (w *OutboxWorker) publishAndMark(ctx context.Context, evt domain.OutboxEven
 	}
 
 	if lastErr != nil {
-		log.Printf("⚠️ No se pudo publicar evento %s: %v", evt.ID, lastErr)
+		w.log.Warn("⚠️ No se pudo publicar evento",
+			zap.String("event_id", evt.ID.String()),
+			zap.String("event_type", evt.EventType),
+			zap.Error(lastErr),
+		)
 		return
 	}
 
 	if err := w.repo.MarkOutboxProcessed(ctx, evt.ID); err != nil {
-		log.Printf("⚠️ No se pudo marcar evento %s como procesado: %v", evt.ID, err)
+		w.log.Warn("⚠️ No se pudo marcar evento %s como procesado",
+			zap.String("event_id", evt.ID.String()),
+			zap.Error(err),
+		)
 	} else {
-		log.Printf("✅ Evento %s publicado y marcado como procesado", evt.ID)
+		w.log.Info("✅ Evento %s publicado y marcado como procesado",
+			zap.String("event_id", evt.ID.String()),
+			zap.String("event_type", evt.EventType),
+		)
 	}
 }

@@ -6,8 +6,8 @@ func RegisterUserRoutes(r *gin.Engine, handler *UserHandler) {
 	users := r.Group("/users")
 	{
 		users.POST("/", handler.CreateUser)
-		users.GET("/:id", handler.GetUser)
-		users.GET("/", handler.ListUsers)
+		users.GET("/", handler.ListUsers)  // Listado de usuarios
+		users.GET("/:id", handler.GetUser) // Usuario por id
 		users.PUT("/:id", handler.UpdateUser)
 		users.DELETE("/:id", handler.DeleteUser)
 	}

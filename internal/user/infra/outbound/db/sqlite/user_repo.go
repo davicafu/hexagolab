@@ -13,6 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/davicafu/hexagolab/internal/user/domain"
+	"github.com/davicafu/hexagolab/internal/user/infra"
 )
 
 type UserRepoSQLite struct {
@@ -43,7 +44,7 @@ func insertOutboxTx(ctx context.Context, tx *sql.Tx, evt domain.OutboxEvent) err
 	return nil
 }
 
-// ------------------ Métodos ------------------
+// ------------------ CRUD + Outbox ------------------
 
 // Create inserta usuario y evento en transacción
 func (r *UserRepoSQLite) Create(ctx context.Context, u *domain.User, evt domain.OutboxEvent) error {
@@ -71,7 +72,7 @@ func (r *UserRepoSQLite) Create(ctx context.Context, u *domain.User, evt domain.
 	return tx.Commit()
 }
 
-// Update actualiza usuario y crea evento Outbox en transacción
+// Update actualiza usuario y crea evento en transacción
 func (r *UserRepoSQLite) Update(ctx context.Context, u *domain.User, evt domain.OutboxEvent) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -97,13 +98,13 @@ func (r *UserRepoSQLite) Update(ctx context.Context, u *domain.User, evt domain.
 	}
 
 	if err := insertOutboxTx(ctx, tx, evt); err != nil {
-		return err
+		return fmt.Errorf("failed to insert outbox: %w", err)
 	}
 
 	return tx.Commit()
 }
 
-// Delete elimina usuario y crea evento Outbox en transacción
+// Delete elimina usuario y crea evento en transacción
 func (r *UserRepoSQLite) DeleteByID(ctx context.Context, id uuid.UUID, evt domain.OutboxEvent) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -125,13 +126,14 @@ func (r *UserRepoSQLite) DeleteByID(ctx context.Context, id uuid.UUID, evt domai
 	}
 
 	if err := insertOutboxTx(ctx, tx, evt); err != nil {
-		return err
+		return fmt.Errorf("failed to insert outbox: %w", err)
 	}
 
 	return tx.Commit()
 }
 
-// GetByID con manejo de errores en uuid.Parse
+// ------------------ Lectura ------------------
+
 func (r *UserRepoSQLite) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
 	query := `SELECT id, email, nombre, birth_date, created_at FROM users WHERE id = ?`
 	row := r.db.QueryRowContext(ctx, query, id.String())
@@ -142,68 +144,80 @@ func (r *UserRepoSQLite) GetByID(ctx context.Context, id uuid.UUID) (*domain.Use
 		if err == sql.ErrNoRows {
 			return nil, domain.ErrUserNotFound
 		}
-		return nil, err
+		return nil, fmt.Errorf("db error: %w", err)
 	}
 
 	parsedID, err := uuid.Parse(idStr)
 	if err != nil {
-		return nil, fmt.Errorf("invalid UUID in DB: %w", err)
+		return nil, domain.ErrInvalidUser
 	}
 	u.ID = parsedID
 
 	return &u, nil
 }
 
-// List con manejo de errores en uuid.Parse y json.Unmarshal
-func (r *UserRepoSQLite) List(ctx context.Context, f domain.UserFilter) ([]*domain.User, error) {
-	var users []*domain.User
+// Traduce criterios neutrales a SQL para Postgres (?, ?...)
+func (r *UserRepoSQLite) applyCriteria(criteria domain.Criteria) (string, []interface{}) {
+	conds := criteria.ToConditions()
+	var clauses []string
 	var args []interface{}
-	var conditions []string
+	for _, c := range conds {
+		clauses = append(clauses, fmt.Sprintf("%s %s ?", c.Field, c.Op))
+		args = append(args, c.Value)
+	}
+	return strings.Join(clauses, " AND "), args
+}
 
-	if f.ID != nil {
-		conditions = append(conditions, "id = ?")
-		args = append(args, f.ID.String())
-	}
-	if f.Email != nil {
-		conditions = append(conditions, "email = ?")
-		args = append(args, *f.Email)
-	}
-	if f.Nombre != nil {
-		conditions = append(conditions, "nombre LIKE ?")
-		args = append(args, "%"+*f.Nombre+"%")
-	}
-	if f.MinAge != nil {
-		conditions = append(conditions, "birth_date <= ?")
-		args = append(args, time.Now().AddDate(-*f.MinAge, 0, 0))
-	}
-	if f.MaxAge != nil {
-		conditions = append(conditions, "birth_date >= ?")
-		args = append(args, time.Now().AddDate(-*f.MaxAge, 0, 0))
+func (r *UserRepoSQLite) ListByCriteria(
+	ctx context.Context,
+	criteria domain.Criteria,
+	pagination domain.Pagination,
+	sort domain.Sort,
+) ([]*domain.User, error) {
+	whereSQL, args := r.applyCriteria(criteria)
+
+	query := "SELECT id, email, nombre, birth_date, created_at FROM users"
+	if whereSQL != "" {
+		query += " WHERE " + whereSQL
 	}
 
-	where := ""
-	if len(conditions) > 0 {
-		where = "WHERE " + strings.Join(conditions, " AND ")
-	}
+	// --- Paginación según tipo ---
+	switch p := pagination.(type) {
+	case domain.OffsetPagination:
+		query += fmt.Sprintf(" ORDER BY %s %s LIMIT ? OFFSET ?",
+			sort.Field, infra.Ternary(sort.Desc, "DESC", "ASC"))
+		args = append(args, p.Limit, p.Offset)
+	case domain.CursorPagination:
+		if p.Cursor != "" {
+			// Separar p.Cursor en sortValue y ID
+			parts := strings.SplitN(p.Cursor, "|", 2)
+			if len(parts) != 2 {
+				return nil, fmt.Errorf("invalid cursor format")
+			}
+			cursorSort := parts[0]
+			cursorID := parts[1]
 
-	orderBy := "created_at DESC"
-	if f.Sort.Field != "" {
-		dir := "ASC"
-		if f.Sort.Desc {
-			dir = "DESC"
+			// Construir la condición WHERE para cursor compuesto
+			condition := fmt.Sprintf("(%s, id) > (?, ?)", sort.Field)
+			if whereSQL != "" {
+				query += " AND " + condition
+			} else {
+				query += " WHERE " + condition
+			}
+
+			// Agregar los valores al args
+			args = append(args, cursorSort, cursorID)
 		}
-		orderBy = fmt.Sprintf("%s %s", f.Sort.Field, dir)
-	}
 
-	limit := f.Pagination.Limit
-	if limit <= 0 {
-		limit = 50
+		// Ordenar primero por el sortField y luego por ID para mantener consistencia
+		query += fmt.Sprintf(
+			" ORDER BY %s %s, id %s LIMIT %d",
+			sort.Field,
+			infra.Ternary(sort.Desc, "DESC", "ASC"),
+			infra.Ternary(sort.Desc, "DESC", "ASC"),
+			p.Limit,
+		)
 	}
-	offset := f.Pagination.Offset
-
-	query := fmt.Sprintf(`SELECT id, email, nombre, birth_date, created_at
-		FROM users %s ORDER BY %s LIMIT ? OFFSET ?`, where, orderBy)
-	args = append(args, limit, offset)
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -211,19 +225,14 @@ func (r *UserRepoSQLite) List(ctx context.Context, f domain.UserFilter) ([]*doma
 	}
 	defer rows.Close()
 
+	var users []*domain.User
 	for rows.Next() {
 		var u domain.User
 		var idStr string
 		if err := rows.Scan(&idStr, &u.Email, &u.Nombre, &u.BirthDate, &u.CreatedAt); err != nil {
 			return nil, err
 		}
-
-		parsedID, err := uuid.Parse(idStr)
-		if err != nil {
-			return nil, fmt.Errorf("invalid UUID in DB: %w", err)
-		}
-		u.ID = parsedID
-
+		u.ID, _ = uuid.Parse(idStr)
 		users = append(users, &u)
 	}
 
@@ -265,17 +274,6 @@ func InitSQLite(db *sql.DB) error {
 
 // ---------------- Patrón Outbox en Eventos-----------------
 
-func (r *UserRepoSQLite) SaveOutboxEvent(ctx context.Context, evt domain.OutboxEvent) error {
-	payloadBytes, _ := json.Marshal(evt.Payload)
-	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO outbox (id, aggregate_type, aggregate_id, event_type, payload, created_at, processed)
-		 VALUES (?, ?, ?, ?, ?, ?, 0)`,
-		evt.ID.String(), evt.AggregateType, evt.AggregateID, evt.EventType, string(payloadBytes), evt.CreatedAt,
-	)
-	return err
-}
-
-// FetchPendingOutbox obtiene eventos pendientes y maneja errores de UUID y JSON
 func (r *UserRepoSQLite) FetchPendingOutbox(ctx context.Context, limit int) ([]domain.OutboxEvent, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, aggregate_type, aggregate_id, event_type, payload, created_at
@@ -322,7 +320,6 @@ func (r *UserRepoSQLite) FetchPendingOutbox(ctx context.Context, limit int) ([]d
 	return events, nil
 }
 
-// MarkOutboxProcessed marca un evento como procesado y devuelve error si falla
 func (r *UserRepoSQLite) MarkOutboxProcessed(ctx context.Context, id uuid.UUID) error {
 	res, err := r.db.ExecContext(ctx,
 		`UPDATE outbox SET processed = 1 WHERE id = ?`,

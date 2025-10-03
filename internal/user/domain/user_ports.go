@@ -33,7 +33,7 @@ type UserRepository interface {
 
 	// List devuelve una lista de usuarios según el filtro (paginación, búsqueda, orden).
 	// Si el filtro está vacío, debe devolver todos los usuarios.
-	List(ctx context.Context, f UserFilter) ([]*User, error)
+	ListByCriteria(ctx context.Context, criteria Criteria, pagination Pagination, sort Sort) ([]*User, error)
 
 	// FetchPendingOutbox obtiene los eventos no procesados, hasta un máximo
 	FetchPendingOutbox(ctx context.Context, limit int) ([]OutboxEvent, error)
@@ -62,32 +62,27 @@ type EventPublisher interface {
 
 // ---------- Tipos de filtrado / paginación / ordenamiento ----------
 
-// Pagination describe límite y offset.
-type Pagination struct {
+// OffsetPagination para paginación clásica
+type OffsetPagination struct {
 	Limit  int
 	Offset int
 }
+
+// CursorPagination para paginación tipo cursor
+type CursorPagination struct {
+	Limit     int
+	Cursor    string // puede ser un timestamp o UUID serializado
+	SortField string
+	SortDesc  bool
+}
+
+// Interfaz genérica para paginación
+type Pagination interface{}
 
 // Sort indica campo y dirección.
 type Sort struct {
 	Field string // ej. "created_at", "nombre", "email"
 	Desc  bool
-}
-
-// UserFilter agrupa criterios de búsqueda que puede usar UserRepository.List.
-type UserFilter struct {
-	// Búsquedas básicas
-	ID     *uuid.UUID // si se pasa, filtra por ID exacto
-	Email  *string    // búsqueda por email (opcional)
-	Nombre *string    // búsqueda por nombre (puede interpretarse como LIKE en el repo)
-
-	// Rangos por edad (calcular con BirthDate en el repo)
-	MinAge *int
-	MaxAge *int
-
-	// Paginación y orden
-	Pagination Pagination
-	Sort       Sort
 }
 
 // ---------- Helpers comunes (cache keys, etc.) ----------

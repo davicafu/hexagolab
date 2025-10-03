@@ -2,81 +2,115 @@ package events
 
 import (
 	"context"
-	"log"
+	"encoding/json"
 	"time"
 
-	"encoding/json"
-
-	"github.com/davicafu/hexagolab/internal/user/application"
+	"github.com/davicafu/hexagolab/internal/shared/events"
 	"github.com/davicafu/hexagolab/internal/user/domain"
+	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
-// UserEvent representa un mensaje de usuario que llega al consumer
 type UserEvent struct {
 	Key     string
 	Payload []byte
 }
 
-// UserConsumer procesa eventos de usuario recibidos.
-type UserConsumer struct {
-	service   *application.UserService
-	batchSize int
+type UserService interface {
+	CreateUser(ctx context.Context, email, nombre string, birthDate time.Time) (*domain.User, error)
+	UpdateUser(ctx context.Context, u *domain.User) error
+	GetUser(ctx context.Context, id uuid.UUID) (*domain.User, error)
 }
 
-// NewUserConsumer crea un consumer para eventos de usuario.
-func NewUserConsumer(service *application.UserService, batchSize int) *UserConsumer {
+type UserConsumer struct {
+	service   UserService
+	batchSize int
+	log       *zap.Logger
+}
+
+func NewUserConsumer(service UserService, batch int, logger *zap.Logger) *UserConsumer {
 	return &UserConsumer{
 		service:   service,
-		batchSize: batchSize,
+		batchSize: batch,
+		log:       logger,
 	}
 }
 
-// HandleMessage recibe un mensaje bruto y lo procesa.
 func (c *UserConsumer) HandleMessage(ctx context.Context, key string, payload []byte) {
-	var users []domain.User
 
-	if err := json.Unmarshal(payload, &users); err != nil {
-		log.Printf("⚠️ Failed to unmarshal user event payload: %v", err)
+	var base events.IntegrationEvent
+	if err := json.Unmarshal(payload, &base); err != nil {
+		c.log.Warn("Failed to unmarshal integration event",
+			zap.String("key", key),
+			zap.Error(err),
+		)
 		return
 	}
 
-	for _, u := range users {
-		ctxUser, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-		defer cancel()
-
-		existing, err := c.service.GetUser(ctxUser, u.ID)
-		if err != nil {
-			if err == domain.ErrUserNotFound {
-				_, err = c.service.CreateUser(ctxUser, u.Email, u.Nombre, u.BirthDate)
+	switch base.Type {
+	case "UserCreated":
+		unmarshalAndHandle[events.UserCreated](c.log, base.Data, func(evt events.UserCreated) {
+			c.withContext(ctx, evt.ID, func(ctxUser context.Context) error {
+				_, err := c.service.CreateUser(ctxUser, evt.Email, evt.Nombre, evt.BirthDate)
+				return err
+			}, "User created via event", evt)
+		})
+	case "UserUpdated":
+		unmarshalAndHandle[events.UserUpdated](c.log, base.Data, func(evt events.UserUpdated) {
+			c.withContext(ctx, evt.ID, func(ctxUser context.Context) error {
+				user, err := c.service.GetUser(ctxUser, evt.ID)
 				if err != nil {
-					log.Printf("⚠️ Failed to create user %s: %v", u.ID, err)
-				} else {
-					log.Printf("✅ User created: %s", u.ID)
+					return err
 				}
-			} else {
-				log.Printf("⚠️ Error fetching user %s: %v", u.ID, err)
-			}
-		} else {
-			existing.Email = u.Email
-			existing.Nombre = u.Nombre
-			existing.BirthDate = u.BirthDate
-
-			if err := c.service.UpdateUser(ctxUser, existing); err != nil {
-				log.Printf("⚠️ Failed to update user %s: %v", u.ID, err)
-			} else {
-				log.Printf("✅ User updated: %s", u.ID)
-			}
-		}
+				user.Email = evt.Email
+				user.Nombre = evt.Nombre
+				user.BirthDate = evt.BirthDate
+				return c.service.UpdateUser(ctxUser, user)
+			}, "User updated via event", evt)
+		})
+	default:
+		c.log.Warn("Unknown event type", zap.String("type", base.Type))
 	}
 }
 
-// BackgroundConsumerChan levanta el consumer escuchando un canal de eventos
+// Helper genérico para deserializar JSON y ejecutar un handler
+func unmarshalAndHandle[T any](log *zap.Logger, data json.RawMessage, handler func(T)) {
+
+	var evt T
+	if err := json.Unmarshal(data, &evt); err != nil {
+		log.Warn("Failed to unmarshal event data", zap.Error(err))
+		return
+	}
+	handler(evt)
+}
+
+// Helper para ejecutar acción con contexto limitado y log
+func (c *UserConsumer) withContext(ctx context.Context, id uuid.UUID, action func(ctx context.Context) error, successMsg string, evt interface{}) {
+
+	ctxUser, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+
+	if err := action(ctxUser); err != nil {
+		c.log.Warn("Failed to process user event",
+			zap.String("user_id", id.String()),
+			zap.Any("event", evt),
+			zap.Error(err),
+		)
+	} else {
+		c.log.Info(successMsg,
+			zap.String("user_id", id.String()),
+			zap.Any("event", evt),
+		)
+	}
+}
+
 func BackgroundConsumerChan(ctx context.Context, ch <-chan UserEvent, consumer *UserConsumer) {
+
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
-				log.Println("🛑 UserConsumer stopped")
+				consumer.log.Info("UserConsumer stopped")
 				return
 			case evt := <-ch:
 				consumer.HandleMessage(ctx, evt.Key, evt.Payload)

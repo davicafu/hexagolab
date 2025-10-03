@@ -33,7 +33,7 @@ func LoadConfig() *Config {
 		KafkaBrokers:   kafkaBrokers,
 		KafkaTopicUser: getEnv("KAFKA_TOPIC", "user-events"),
 		CacheTTL:       5 * time.Minute,
-		OutboxPeriod:   1 * time.Second,
+		OutboxPeriod:   2 * time.Second,
 		OutboxLimit:    10,
 		HTTPPort:       getEnv("HTTP_PORT", "8080"),
 	}

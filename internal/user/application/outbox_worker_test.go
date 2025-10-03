@@ -9,6 +9,7 @@ import (
 	"github.com/davicafu/hexagolab/tests/mocks"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
+	"go.uber.org/zap"
 )
 
 // MinimalRepo implementa UserRepository mínimo para OutboxWorker
@@ -39,7 +40,7 @@ func (r *MinimalRepo) Update(ctx context.Context, u *domain.User, evt domain.Out
 func (r *MinimalRepo) DeleteByID(ctx context.Context, id uuid.UUID, evt domain.OutboxEvent) error {
 	panic("not implemented")
 }
-func (r *MinimalRepo) List(ctx context.Context, f domain.UserFilter) ([]*domain.User, error) {
+func (r *MinimalRepo) ListByCriteria(context.Context, domain.Criteria, domain.Pagination, domain.Sort) ([]*domain.User, error) {
 	panic("not implemented")
 }
 func (r *MinimalRepo) SaveOutboxEvent(ctx context.Context, evt domain.OutboxEvent) error {
@@ -47,6 +48,7 @@ func (r *MinimalRepo) SaveOutboxEvent(ctx context.Context, evt domain.OutboxEven
 }
 
 func TestOutboxWorker_ProcessBatch(t *testing.T) {
+
 	ctx := context.Background()
 	repo := new(MinimalRepo)
 	publisher := new(mocks.MockPublisher)
@@ -69,7 +71,7 @@ func TestOutboxWorker_ProcessBatch(t *testing.T) {
 	publisher.On("Publish", mock.Anything, evt.EventType, mock.Anything).Return(nil).Once()
 
 	// Crear worker (no llamamos a Start, para evitar goroutines)
-	worker := NewOutboxWorker(repo, publisher, 10*time.Millisecond, 10)
+	worker := NewOutboxWorker(repo, publisher, 10*time.Millisecond, 10, zap.NewNop())
 
 	// Ejecutar la función directamente
 	worker.ProcessBatch(ctx)
@@ -80,8 +82,6 @@ func TestOutboxWorker_ProcessBatch(t *testing.T) {
 }
 
 func TestOutboxWorker_Enqueue(t *testing.T) {
-	//ctx, cancel := context.WithCancel(context.Background())
-	//defer cancel()
 
 	repo := new(MinimalRepo)
 	publisher := new(mocks.MockPublisher)
@@ -103,7 +103,7 @@ func TestOutboxWorker_Enqueue(t *testing.T) {
 	repo.On("MarkOutboxProcessed", mock.Anything, evt.ID).Return(nil).Once()
 
 	// Crear worker con canal
-	worker := NewOutboxWorker(repo, publisher, 50*time.Millisecond, 10)
+	worker := NewOutboxWorker(repo, publisher, 50*time.Millisecond, 10, zap.NewNop())
 	// Procesa el evento directamente:
 	worker.publishAndMark(context.Background(), evt)
 

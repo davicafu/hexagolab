@@ -2,11 +2,12 @@ package application
 
 import (
 	"context"
-	"log"
+	"errors"
 	"time"
 
 	"github.com/davicafu/hexagolab/internal/user/domain"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 // UserService define los casos de uso relacionados con User.
@@ -14,14 +15,16 @@ type UserService struct {
 	repo   domain.UserRepository
 	cache  domain.UserCache
 	events domain.EventPublisher
+	log    *zap.Logger
 }
 
 // NewUserService constructor
-func NewUserService(repo domain.UserRepository, cache domain.UserCache, events domain.EventPublisher) *UserService {
+func NewUserService(repo domain.UserRepository, cache domain.UserCache, events domain.EventPublisher, log *zap.Logger) *UserService {
 	return &UserService{
 		repo:   repo,
 		cache:  cache,
 		events: events,
+		log:    log,
 	}
 }
 
@@ -138,6 +141,11 @@ func (s *UserService) GetUser(ctx context.Context, id uuid.UUID) (*domain.User, 
 		return err
 	})
 	if err != nil {
+		if errors.Is(err, domain.ErrUserNotFound) {
+			s.log.Warn("User not found", zap.String("user_id", id.String()))
+		} else {
+			s.log.Error("Failed to fetch user", zap.String("user_id", id.String()), zap.Error(err))
+		}
 		return nil, err
 	}
 
@@ -147,7 +155,10 @@ func (s *UserService) GetUser(ctx context.Context, id uuid.UUID) (*domain.User, 
 			ctxCache, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 			if err := s.cache.Set(ctxCache, domain.CacheKeyByID(u.ID), u, 60); err != nil {
-				log.Printf("⚠️ Cache update failed for user %s: %v", u.ID, err)
+				s.log.Warn("⚠️ Cache update failed",
+					zap.String("user_id", u.ID.String()),
+					zap.Error(err),
+				)
 			}
 		}(user)
 	}
@@ -156,40 +167,17 @@ func (s *UserService) GetUser(ctx context.Context, id uuid.UUID) (*domain.User, 
 }
 
 // ListUsers devuelve todos los usuarios aplicando filtros.
-func (s *UserService) ListUsers(ctx context.Context, f domain.UserFilter) ([]*domain.User, error) {
-	return s.repo.List(ctx, f)
+func (s *UserService) ListUsers(ctx context.Context, criteria domain.Criteria, pagination domain.Pagination, sort domain.Sort) ([]*domain.User, error) {
+	return s.repo.ListByCriteria(ctx, criteria, pagination, sort)
 }
 
-func (s *UserService) SearchUsersByName(ctx context.Context, name string) ([]*domain.User, error) {
-	filter := domain.UserFilter{
-		Nombre: &name,
-		Pagination: domain.Pagination{
-			Limit:  20,
-			Offset: 0,
-		},
-		Sort: domain.Sort{
-			Field: "created_at",
-			Desc:  true,
+func (s *UserService) ListAdultUsers(ctx context.Context, pagination domain.Pagination, sort domain.Sort) ([]*domain.User, error) {
+	minAge := 18
+	criteria := domain.CompositeCriteria{
+		Operator: domain.OpAnd,
+		Criterias: []domain.Criteria{
+			domain.AgeRangeCriteria{Min: &minAge},
 		},
 	}
-
-	return s.repo.List(ctx, filter)
-}
-
-func (s *UserService) FilterUsers(ctx context.Context, minAge, maxAge int, email string) ([]*domain.User, error) {
-	filter := domain.UserFilter{
-		Email:  &email,
-		MinAge: &minAge,
-		MaxAge: &maxAge,
-		Pagination: domain.Pagination{
-			Limit:  50,
-			Offset: 0,
-		},
-		Sort: domain.Sort{
-			Field: "nombre",
-			Desc:  false,
-		},
-	}
-
-	return s.repo.List(ctx, filter)
+	return s.repo.ListByCriteria(ctx, criteria, pagination, sort)
 }

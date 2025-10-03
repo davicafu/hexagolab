@@ -6,36 +6,38 @@
 
 - [ ] CRUD completo para:
     - Usuarios
-    - Coches (cada coche pertenece a un usuario)
-    - Tareas (asociadas a usuarios y coches)
+    - Tareas
 
 - [ ] Consultas avanzadas:
-    - [ ] Filtrado, paginación y ordenamiento
-    - [ ] Obtener coches de un usuario, tareas de un coche y usuario
-    - [ ] Validaciones de entrada
+    - [ ] Filtrado, paginación (offset y cursor) y ordenamiento
+    - [ ] Búsqueda de usuarios por nombre, mail, rango de edad
+    - [ ] Obtener tareas de un usuario, usuario con más tareas, tareas sin asignar
+    - [ ] Validaciones de entrada (prevención de: inyección SQL, búsqueda por columnas ocultas)
     - [ ] Manejo de errores claro y consistente
     - [ ] Autenticación y autorización básicas
     - [ ] Logging y métricas mínimas
     - [ ] Publicación de eventos relevantes:
-        - UsuarioCreado, CocheAsignado, TareaActualizada
+        - UsuarioCreado, UsuarioModificado, UsuarioEliminado, TareaCreada, TareaActualizada, TareaFinalizada
 
 ### 2️⃣ Arquitectura hexagonal
 
 #### Domain
 Toda la lógica de negocio y las interfaces (ports) están aisladas.
-- user.go, car.go y task.go contendrán solo entidades y reglas de negocio.
+- user.go y task.go contendrán solo entidades y reglas de negocio.
 - ports.go contendrá interfaces para repositorio, cache y events. Esto permite testear la lógica de negocio con mocks sin depender de implementaciones concretas.
+- Tests unitarios de dominio aislados.
 
 #### Application
 - Servicios que orquestan la lógica de negocio usando los ports.
 - Los services (user_service.go, etc.) reciben interfaces como dependencias, lo que permite inyectar repositorios, cache y event publishers concretos.
 - Aquí se implementa la coordinación de operaciones (por ejemplo, crear un usuario, guardar en cache y publicar evento).
+- Uso del patrón Outbox Event para la publicación de eventos del dominio. Se prioriza garantarizar la no pérdida de eventos.
+- Uso del patrón Criteria para la búsqueda genérica de usuario o tareas.
 
-#### Adapters 
-- Inbound: HTTP/gRPC handlers. Los handlers HTTP solo llaman a los services de application, no conocen detalles de DB, cache o events.
+#### Infra (Adapters)
+- Inbound: HTTP/gRPC/Events handlers. Los handlers HTTP solo llaman a los services de application, no conocen detalles de DB, cache o events.
 - Outbound: implementan las interfaces definidas en ports.go. Permitirá cambiar tecnologías (Postgres → MySQL, Redis → Memcached, Kafka → RabbitMQ) sin tocar la lógica de negocio.
 - Independencia de frameworks y librerías.
-- Tests unitarios de dominio aislados.
 
 💡 Tip para implementación:
 
@@ -48,14 +50,14 @@ Toda la lógica de negocio y las interfaces (ports) están aisladas.
 
 ### 3️⃣ Cache
 
-- [ ] Guardar lecturas frecuentes (usuarios, coches)
-- [ ] TTL configurable para los datos
-- [ ] Actualización de cache después de modificaciones
+- [x] Guardar lecturas frecuentes (usuarios, tareas)
+- [x] TTL configurable para los datos
+- [x] Actualización de cache después de modificaciones
 
 ### 4️⃣ Event-driven
 
-- [ ] Publicación de eventos al crear o modificar entidades
-- [ ] Posibilidad de suscribirse a eventos de otros servicios
+- [x] Publicación de eventos al crear o modificar entidades
+- [x] Posibilidad de suscribirse a eventos de otros servicios
 
 ### 5️⃣ Buenas prácticas de programación
 
@@ -72,12 +74,12 @@ Toda la lógica de negocio y las interfaces (ports) están aisladas.
     - Dev/prod parity: entornos similares
     - Logs: flujos de eventos, no ficheros locales
     - Admin processes: tareas de administración como procesos independientes
-- [ ] Config y pkg: configuración centralizada y utilidades compartidas.
+- [x] Config y pkg: configuración centralizada y utilidades compartidas.
 - [ ] Tests: 
-    - [ ] Unit tests: solo importa domain y application, usando mocks (stubs, mocks, fakes, dummy, spy) de adapters.
+    - [x] Unit tests: solo importa domain y application, usando mocks (stubs, mocks, fakes, dummy, spy) de adapters.
     - [ ] Integration tests: importan adapters concretos para probar DB, cache y eventos juntos.
 - [ ] Documentación de API: OpenAPI / Swagger
-- [ ] Logs estructurados
+- [-] Logs estructurados
 - [ ] Manejo centralizado de errores
 - [ ] Seguridad: sanitización de inputs, rate limiting, HTTPS
 - [ ] CI/CD básico
@@ -95,18 +97,8 @@ Toda la lógica de negocio y las interfaces (ports) están aisladas.
     3. Publica evento userCreated en broker.
 4. Handler devuelve 201 Created al cliente.
 
-##### Flujo ejemplo: Obtener un Coche
+##### Flujo ejemplo: Tarea asignada a un usuario
 
-1. Cliente envía GET /cars/{id}.
-2. car_handler.go llama a car_service.get_car(id).
-    1. Intenta obtener el coche desde cache (Redis).
-    2. Si cache miss → obtiene de DB, luego actualiza la cache.
-    3. Devuelve la entidad al handler → respuesta al cliente.
-
-##### Flujo ejemplo: Tarea asignada a un coche y usuario
-
-1. Crear tarea: TaskService recibe userID y carID.
-2. Guarda en DB → actualiza cache → publica evento TareaCreada.
+1. Crear tarea: TaskService recibe userID.
+2. Guarda en DB → actualiza cache → publica evento taskCreated.
 3. Otros servicios pueden suscribirse al evento y reaccionar (por ejemplo, notificación de nueva tarea).
-
-### 7️⃣ Algoritmos

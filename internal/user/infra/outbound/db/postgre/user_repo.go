@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/davicafu/hexagolab/internal/user/domain"
+	"github.com/davicafu/hexagolab/internal/user/infra"
 	"github.com/google/uuid"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -43,6 +44,7 @@ func insertOutboxTx(ctx context.Context, tx *sql.Tx, evt domain.OutboxEvent) err
 
 // ------------------ CRUD + Outbox ------------------
 
+// Create inserta usuario y evento en transacción
 func (r *UserRepoPostgres) Create(ctx context.Context, u *domain.User, evt domain.OutboxEvent) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -70,10 +72,11 @@ func (r *UserRepoPostgres) Create(ctx context.Context, u *domain.User, evt domai
 	return tx.Commit()
 }
 
+// Update actualiza usuario y crea evento en transacción
 func (r *UserRepoPostgres) Update(ctx context.Context, u *domain.User, evt domain.OutboxEvent) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to begin tx: %w", err)
 	}
 	defer func() {
 		if err != nil {
@@ -86,7 +89,7 @@ func (r *UserRepoPostgres) Update(ctx context.Context, u *domain.User, evt domai
 		u.Email, u.Nombre, u.BirthDate, u.ID,
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("db error: %w", err)
 	}
 
 	rows, _ := res.RowsAffected()
@@ -95,16 +98,17 @@ func (r *UserRepoPostgres) Update(ctx context.Context, u *domain.User, evt domai
 	}
 
 	if err := insertOutboxTx(ctx, tx, evt); err != nil {
-		return err
+		return fmt.Errorf("failed to insert outbox: %w", err)
 	}
 
 	return tx.Commit()
 }
 
+// Delete elimina usuario y crea evento en transacción
 func (r *UserRepoPostgres) DeleteByID(ctx context.Context, id uuid.UUID, evt domain.OutboxEvent) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to begin tx: %w", err)
 	}
 	defer func() {
 		if err != nil {
@@ -114,7 +118,7 @@ func (r *UserRepoPostgres) DeleteByID(ctx context.Context, id uuid.UUID, evt dom
 
 	res, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id=$1`, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("db error: %w", err)
 	}
 
 	rows, _ := res.RowsAffected()
@@ -123,7 +127,7 @@ func (r *UserRepoPostgres) DeleteByID(ctx context.Context, id uuid.UUID, evt dom
 	}
 
 	if err := insertOutboxTx(ctx, tx, evt); err != nil {
-		return err
+		return fmt.Errorf("failed to insert outbox: %w", err)
 	}
 
 	return tx.Commit()
@@ -141,68 +145,63 @@ func (r *UserRepoPostgres) GetByID(ctx context.Context, id uuid.UUID) (*domain.U
 		if err == sql.ErrNoRows {
 			return nil, domain.ErrUserNotFound
 		}
-		return nil, err
+		return nil, fmt.Errorf("db error: %w", err)
 	}
 
 	parsedID, err := uuid.Parse(idStr)
 	if err != nil {
-		return nil, fmt.Errorf("invalid UUID in DB: %w", err)
+		return nil, domain.ErrInvalidUser
 	}
 	u.ID = parsedID
 
 	return &u, nil
 }
 
-func (r *UserRepoPostgres) List(ctx context.Context, f domain.UserFilter) ([]*domain.User, error) {
-	var users []*domain.User
+// Traduce criterios neutrales a SQL para Postgres ($1, $2...)
+func (r *UserRepoPostgres) applyCriteria(criteria domain.Criteria) (string, []interface{}) {
+	conds := criteria.ToConditions()
+	var clauses []string
 	var args []interface{}
-	var conditions []string
+	for i, c := range conds {
+		clauses = append(clauses, fmt.Sprintf("%s %s $%d", c.Field, c.Op, i+1))
+		args = append(args, c.Value)
+	}
+	return strings.Join(clauses, " AND "), args
+}
 
-	if f.ID != nil {
-		conditions = append(conditions, "id = $1")
-		args = append(args, f.ID)
-	}
-	if f.Email != nil {
-		conditions = append(conditions, fmt.Sprintf("email = $%d", len(args)+1))
-		args = append(args, *f.Email)
-	}
-	if f.Nombre != nil {
-		conditions = append(conditions, fmt.Sprintf("nombre ILIKE $%d", len(args)+1))
-		args = append(args, "%"+*f.Nombre+"%")
-	}
-	if f.MinAge != nil {
-		conditions = append(conditions, fmt.Sprintf("birth_date <= $%d", len(args)+1))
-		args = append(args, time.Now().AddDate(-*f.MinAge, 0, 0))
-	}
-	if f.MaxAge != nil {
-		conditions = append(conditions, fmt.Sprintf("birth_date >= $%d", len(args)+1))
-		args = append(args, time.Now().AddDate(-*f.MaxAge, 0, 0))
+func (r *UserRepoPostgres) ListByCriteria(ctx context.Context, criteria domain.Criteria, pagination domain.Pagination, sort domain.Sort) ([]*domain.User, error) {
+	whereSQL, args := r.applyCriteria(criteria)
+
+	query := "SELECT id, email, nombre, birth_date, created_at FROM users"
+	if whereSQL != "" {
+		query += " WHERE " + whereSQL
 	}
 
-	where := ""
-	if len(conditions) > 0 {
-		where = "WHERE " + strings.Join(conditions, " AND ")
-	}
+	// --- Paginación según tipo ---
+	switch p := pagination.(type) {
+	case domain.OffsetPagination:
+		args = append(args, p.Limit, p.Offset)
+		query += fmt.Sprintf(" ORDER BY %s %s LIMIT $%d OFFSET $%d",
+			sort.Field, infra.Ternary(sort.Desc, "DESC", "ASC"), len(args)-1, len(args))
+	case domain.CursorPagination:
+		if p.Cursor != "" {
+			parts := strings.SplitN(p.Cursor, "|", 2)
+			cursorSort := parts[0]
+			cursorID := parts[1]
 
-	orderBy := "created_at DESC"
-	if f.Sort.Field != "" {
-		dir := "ASC"
-		if f.Sort.Desc {
-			dir = "DESC"
+			if whereSQL != "" {
+				query += fmt.Sprintf(" AND (%s, id) > ($%d, $%d)", sort.Field, len(args)+1, len(args)+2)
+			} else {
+				query += fmt.Sprintf(" WHERE (%s, id) > ($%d, $%d)", sort.Field, len(args)+1, len(args)+2)
+			}
+			args = append(args, cursorSort, cursorID)
 		}
-		orderBy = fmt.Sprintf("%s %s", f.Sort.Field, dir)
+		query += fmt.Sprintf(" ORDER BY %s %s, id %s LIMIT %d",
+			sort.Field, infra.Ternary(sort.Desc, "DESC", "ASC"),
+			infra.Ternary(sort.Desc, "DESC", "ASC"),
+			p.Limit,
+		)
 	}
-
-	limit := f.Pagination.Limit
-	if limit <= 0 {
-		limit = 50
-	}
-	offset := f.Pagination.Offset
-
-	args = append(args, limit, offset)
-	query := fmt.Sprintf(`SELECT id, email, nombre, birth_date, created_at FROM users %s ORDER BY %s LIMIT $%d OFFSET $%d`,
-		where, orderBy, len(args)-1, len(args),
-	)
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -210,26 +209,49 @@ func (r *UserRepoPostgres) List(ctx context.Context, f domain.UserFilter) ([]*do
 	}
 	defer rows.Close()
 
+	var users []*domain.User
 	for rows.Next() {
 		var u domain.User
 		var idStr string
 		if err := rows.Scan(&idStr, &u.Email, &u.Nombre, &u.BirthDate, &u.CreatedAt); err != nil {
 			return nil, err
 		}
-
-		parsedID, err := uuid.Parse(idStr)
-		if err != nil {
-			return nil, fmt.Errorf("invalid UUID in DB: %w", err)
-		}
-		u.ID = parsedID
-
+		u.ID, _ = uuid.Parse(idStr)
 		users = append(users, &u)
 	}
 
 	return users, nil
 }
 
-// ------------------ Outbox ------------------
+// ------------------ Inicialización ------------------
+
+func InitPostgres(db *sql.DB) error {
+	_, err := db.Exec(`
+	CREATE TABLE IF NOT EXISTS users (
+		id UUID PRIMARY KEY,
+		email TEXT UNIQUE NOT NULL,
+		nombre TEXT NOT NULL,
+		birth_date DATE NOT NULL,
+		created_at TIMESTAMP NOT NULL
+	)`)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`
+	CREATE TABLE IF NOT EXISTS outbox (
+		id UUID PRIMARY KEY,
+		aggregate_type TEXT NOT NULL,
+		aggregate_id UUID NOT NULL,
+		event_type TEXT NOT NULL,
+		payload JSONB NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		processed BOOLEAN NOT NULL DEFAULT FALSE
+	)`)
+	return err
+}
+
+// ---------------- Patrón Outbox en Eventos-----------------
 
 func (r *UserRepoPostgres) FetchPendingOutbox(ctx context.Context, limit int) ([]domain.OutboxEvent, error) {
 	rows, err := r.db.QueryContext(ctx,
@@ -279,47 +301,18 @@ func (r *UserRepoPostgres) FetchPendingOutbox(ctx context.Context, limit int) ([
 }
 
 func (r *UserRepoPostgres) MarkOutboxProcessed(ctx context.Context, id uuid.UUID) error {
-	res, err := r.db.ExecContext(ctx,
-		`UPDATE outbox SET processed=true WHERE id=$1`, id)
+	res, err := r.db.ExecContext(ctx, `UPDATE outbox SET processed=true WHERE id=$1`, id)
 	if err != nil {
-		return fmt.Errorf("failed to mark outbox event %s as processed: %w", id, err)
+		return fmt.Errorf("db error: %w", err)
 	}
 
 	rows, err := res.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("failed to get RowsAffected for outbox event %s: %w", id, err)
+		return fmt.Errorf("failed to get RowsAffected: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("no outbox event found with id %s", id)
+		return fmt.Errorf("outbox event not found: %s", id)
 	}
 
 	return nil
-}
-
-// ------------------ Inicialización ------------------
-
-func InitPostgres(db *sql.DB) error {
-	_, err := db.Exec(`
-	CREATE TABLE IF NOT EXISTS users (
-		id UUID PRIMARY KEY,
-		email TEXT UNIQUE NOT NULL,
-		nombre TEXT NOT NULL,
-		birth_date DATE NOT NULL,
-		created_at TIMESTAMP NOT NULL
-	)`)
-	if err != nil {
-		return err
-	}
-
-	_, err = db.Exec(`
-	CREATE TABLE IF NOT EXISTS outbox (
-		id UUID PRIMARY KEY,
-		aggregate_type TEXT NOT NULL,
-		aggregate_id UUID NOT NULL,
-		event_type TEXT NOT NULL,
-		payload JSONB NOT NULL,
-		created_at TIMESTAMP NOT NULL,
-		processed BOOLEAN NOT NULL DEFAULT FALSE
-	)`)
-	return err
 }
