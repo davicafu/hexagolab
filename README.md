@@ -100,7 +100,7 @@ Este proyecto utiliza un Makefile para automatizar las tareas de desarrollo más
 
 `make coverage-html`: Genera un informe visual de la cobertura en un archivo coverage.html. Ábrelo en tu navegador para ver qué líneas de código están cubiertas.
 
-Herramientas Adicionales
+### Herramientas Adicionales
 `make build-proto`: Genera (o regenera) el código Go a partir de los archivos .proto para gRPC.
 
 `make clean`: Elimina todos los archivos generados por la compilación y los tests (bin/, coverage.out, coverage.html).
