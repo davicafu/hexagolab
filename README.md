@@ -1,104 +1,114 @@
-# Microservicio con arquitectura hexagonal 
+# Hexagolab: Microservicio con Arquitectura Hexagonal en Go 🚀
 
-## Requisitos
+Este proyecto es una implementación de referencia de un microservicio en Go, diseñado siguiendo los principios de la **Arquitectura Hexagonal (Puertos y Adaptadores)** y estructurado como un **Monolito Modular**. Su propósito es servir como un ejemplo práctico de cómo construir aplicaciones robustas, escalables y fáciles de mantener.
 
-### 1️⃣ Funcionales
+---
 
-- [ ] CRUD completo para:
-    - Usuarios
-    - Tareas
+## ✨ Características Principales
 
-- [ ] Consultas avanzadas:
-    - [ ] Filtrado, paginación (offset y cursor) y ordenamiento
-    - [ ] Búsqueda de usuarios por nombre, mail, rango de edad
-    - [ ] Obtener tareas de un usuario, usuario con más tareas, tareas sin asignar
-    - [ ] Validaciones de entrada (prevención de: inyección SQL, búsqueda por columnas ocultas)
-    - [ ] Manejo de errores claro y consistente
-    - [ ] Autenticación y autorización básicas
-    - [ ] Logging y métricas mínimas
-    - [ ] Publicación de eventos relevantes:
-        - UsuarioCreado, UsuarioModificado, UsuarioEliminado, TareaCreada, TareaActualizada, TareaFinalizada
+- ✅ **CRUD completo** para dos dominios de negocio independientes: **Usuarios** y **Tareas**.
+- ✅ **API dual**: expone la funcionalidad a través de una API **REST (Gin)** y una API de alto rendimiento **gRPC**.
+- ✅ **Sistema de eventos robusto** con el patrón **Transactional Outbox**, garantizando que nunca se pierdan eventos de dominio (`UserCreated`, `TaskCompleted`, etc.).
+- ✅ **Adaptadores de infraestructura intercambiables**:
+    - **Bases de Datos**: Soporte para PostgreSQL y SQLite.
+    - **Caché**: Soporte para Redis y una caché en memoria.
+    - **Bus de Eventos**: Soporte para Kafka y un bus en memoria basado en canales, ideal para desarrollo local.
+- ✅ **Consultas avanzadas** mediante el **Patrón Criteria**, permitiendo filtrado, paginación (offset) y ordenamiento dinámico.
+- ✅ **Tests completos**: Cobertura de tests unitarios (dominio), de componente (servicios con mocks) y de integración (con bases de datos reales).
+- ✅ **Configuración centralizada** a través de variables de entorno, siguiendo las mejores prácticas de **12-Factor App**.
+- ✅ **Logging estructurado** con `zap` para una mejor observabilidad.
 
-### 2️⃣ Arquitectura hexagonal
+---
 
-#### Domain
-Toda la lógica de negocio y las interfaces (ports) están aisladas.
-- user.go y task.go contendrán solo entidades y reglas de negocio.
-- ports.go contendrá interfaces para repositorio, cache y events. Esto permite testear la lógica de negocio con mocks sin depender de implementaciones concretas.
-- Tests unitarios de dominio aislados.
+## 🏛️ Arquitectura: Monolito Modular Hexagonal
 
-#### Application
-- Servicios que orquestan la lógica de negocio usando los ports.
-- Los services (user_service.go, etc.) reciben interfaces como dependencias, lo que permite inyectar repositorios, cache y event publishers concretos.
-- Aquí se implementa la coordinación de operaciones (por ejemplo, crear un usuario, guardar en cache y publicar evento).
-- Uso del patrón Outbox Event para la publicación de eventos del dominio. Se prioriza garantarizar la no pérdida de eventos.
-- Uso del patrón Criteria para la búsqueda genérica de usuario o tareas.
+El proyecto está organizado como un **Monolito Modular**, donde cada dominio de negocio (`user`, `task`) es un módulo autocontenido. La comunicación con el mundo exterior se gestiona a través de una capa de infraestructura centralizada, siguiendo la **Arquitectura Hexagonal**.
 
-#### Infra (Adapters)
-- Inbound: HTTP/gRPC/Events handlers. Los handlers HTTP solo llaman a los services de application, no conocen detalles de DB, cache o events.
-- Outbound: implementan las interfaces definidas en ports.go. Permitirá cambiar tecnologías (Postgres → MySQL, Redis → Memcached, Kafka → RabbitMQ) sin tocar la lógica de negocio.
-- Independencia de frameworks y librerías.
+La regla fundamental es la **Inversión de Dependencias**: la infraestructura (`infra`) depende de las abstracciones del dominio (`domain`), pero el dominio nunca depende de la infraestructura.
 
-💡 Tip para implementación:
+### 🧱 Capas Principales
 
-- Mantener las interfaces de ports puras en domain/ports.go.
-- Nunca instanciar adapters concretos dentro del dominio o de application, hacerlo en main.go y pasarlos a los services.
-- Para cache y events, implementar TTL y manejo de errores, así los services no fallan si el broker o Redis tienen un problema temporal.
-- Utilizar goroutines para tareas que no deben bloquear al cliente (eventos, cache updates, logging).
-- Utilizar channels como colas internas para desacoplar productores/consumidores (event bus, workers).
-- Para consultas compuestas, aprovechar goroutines para paralelizar.
+1.  **`shared/` (Contratos y Abstracciones)**
+    - Contiene las interfaces (puertos) y los DTOs compartidos por toda la aplicación. Es el "plano" de la arquitectura.
+    - **`platform/`**: Define los puertos de infraestructura (`EventPublisher`, `Cache`).
+    - **`domain/`**: Define conceptos de dominio compartidos (`Criteria`, `OutboxEvent`).
 
-### 3️⃣ Cache
+2.  **`internal/` (El núcleo de la Aplicación)**
+    - Esta carpeta contiene todo el código privado de la aplicación, organizado en módulos de dominio y una capa de infraestructura compartida.
 
-- [x] Guardar lecturas frecuentes (usuarios, tareas)
-- [x] TTL configurable para los datos
-- [x] Actualización de cache después de modificaciones
+    - Módulos de Dominio (internal/user, internal/task): Cada módulo es una "porción vertical" autocontenida que agrupa toda la lógica de negocio para una entidad específica.
 
-### 4️⃣ Event-driven
+        - **domain/**: La lógica de negocio pura. Contiene las entidades (User, Task), las reglas y las interfaces de repositorio (UserRepository).
 
-- [x] Publicación de eventos al crear o modificar entidades
-- [x] Posibilidad de suscribirse a eventos de otros servicios
+        - **application/**: Los casos de uso. Contiene los Services que orquestan la lógica de negocio.
 
-### 5️⃣ Buenas prácticas de programación
+        - **infra/** (específica del Dominio): Contiene adaptadores que están íntimamente ligados a este dominio.
 
-- 12 Factor App
-    - Código base: un repositorio por microservicio
-    - Dependencias: declaradas explícitamente (go.mod)
-    - Configuración: mediante variables de entorno
-    - Backing services: DB, Redis, broker como recursos adjuntos
-    - Build, release, run: fases separadas
-    - Procesos: stateless, ejecutables independientes
-    - Port binding: exponer servicios HTTP y event consumers
-    - Concurrency: soportar escalado horizontal
-    - Disposability: iniciar y detener rápido
-    - Dev/prod parity: entornos similares
-    - Logs: flujos de eventos, no ficheros locales
-    - Admin processes: tareas de administración como procesos independientes
-- [x] Config y pkg: configuración centralizada y utilidades compartidas.
-- [ ] Tests: 
-    - [x] Unit tests: solo importa domain y application, usando mocks (stubs, mocks, fakes, dummy, spy) de adapters.
-    - [ ] Integration tests: importan adapters concretos para probar DB, cache y eventos juntos.
-- [ ] Documentación de API: OpenAPI / Swagger
-- [-] Logs estructurados
-- [ ] Manejo centralizado de errores
-- [ ] Seguridad: sanitización de inputs, rate limiting, HTTPS
-- [ ] CI/CD básico
-- [ ] Monitorización mínima (Prometheus/Grafana)
+    - **internal/infra/** (Infraestructura Compartida):
+    Contiene los adaptadores de infraestructura tecnológica y compartida que dan servicio a toda la aplicación. Aquí es donde residen las implementaciones concretas para tecnologías de propósito general como PostgreSQL (como el patrón Outbox), Kafka, Redis, el servidor web (Gin), gRPC, etc.
 
-### 6️⃣ Casos de Uso
+3.  **`cmd/` (Puntos de Entrada)**
+    - Contiene los ejecutables (`main.go`). Su única responsabilidad es leer la configuración, construir todas las dependencias (el "ensamblaje") y arrancar la aplicación (el servidor HTTP, el `relayer` de outbox, etc.).
 
-##### Flujo ejemplo: Crear un Usuario
+---
 
-1. Cliente envía POST.
-2. user_handler.go recibe la request y la transforma en un objeto User.
-3. Llama a user_service.createUser(usuario).
-    1. Guarda el usuario en repositorio (DB).
-    2. Guarda en cache (Redis) para lecturas rápidas.
-    3. Publica evento userCreated en broker.
-4. Handler devuelve 201 Created al cliente.
+## 🚀 Cómo Empezar
 
-##### Flujo ejemplo: Tarea asignada a un usuario
+### Prerrequisitos
+- Go 1.24+
+- Docker y Docker Compose si no se desea usar memoria (para ejecutar PostgreSQL, Kafka y Redis)
+- `protoc` (para generar código gRPC)
 
-1. Crear tarea: TaskService recibe userID.
-2. Guarda en DB → actualiza cache → publica evento taskCreated.
-3. Otros servicios pueden suscribirse al evento y reaccionar (por ejemplo, notificación de nueva tarea).
+### Configuración
+1.  Copia el archivo de configuración de ejemplo:
+    ```bash
+    cp .env.example .env
+    ```
+2.  Revisa y ajusta las variables de entorno en el archivo `.env` según tu configuración local.
+
+### Ejecutar la Aplicación
+1.  Inicia los servicios de infraestructura (Postgres, Kafka, etc.):
+    ```bash
+    docker-compose up -d
+    ```
+2.  Ejecuta la aplicación principal (servidor API):
+    ```bash
+    go run ./cmd/api/main.go
+    ```
+3.  Ejecuta el `relayer` del Outbox en una terminal separada:
+    ```bash
+    go run ./cmd/outbox-relayer/main.go
+    ```
+
+## 🛠️ Comandos de Desarrollo (Makefile)
+Este proyecto utiliza un Makefile para automatizar las tareas de desarrollo más comunes. Abre una terminal en la raíz del proyecto y ejecuta los siguientes comandos:
+
+### Compilación y Ejecución
+`make build`: Compila los binarios de la aplicación (api y relayer) en la carpeta bin/.
+
+`make run`: Ejecuta la aplicación principal (el servidor API).
+
+### Testing
+`make tests`: Ejecuta todos los tests del proyecto (unitarios y de integración).
+
+`make unit-test`: Ejecuta solo los tests unitarios, que son rápidos y no requieren dependencias externas.
+
+`make integration-test`: Ejecuta solo los tests de integración, que prueban la conexión con bases de datos reales (requiere tener Docker corriendo).
+
+### Cobertura de Código
+`make coverage`: Calcula la cobertura de los tests y muestra un resumen por función en la terminal.
+
+`make coverage-html`: Genera un informe visual de la cobertura en un archivo coverage.html. Ábrelo en tu navegador para ver qué líneas de código están cubiertas.
+
+Herramientas Adicionales
+`make build-proto`: Genera (o regenera) el código Go a partir de los archivos .proto para gRPC.
+
+`make clean`: Elimina todos los archivos generados por la compilación y los tests (bin/, coverage.out, coverage.html).
+
+### Ejemplos de uso
+```bash
+# Para ejecutar solo los tests unitarios
+make unit-test
+
+# Para generar el informe de cobertura y abrirlo
+make coverage-html
