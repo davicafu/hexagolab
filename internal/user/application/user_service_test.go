@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davicafu/hexagolab/internal/user/domain"
+	userDomain "github.com/davicafu/hexagolab/internal/user/domain"
+	sharedDomain "github.com/davicafu/hexagolab/shared/domain"
+	sharedQuery "github.com/davicafu/hexagolab/shared/platform/query"
 	"github.com/davicafu/hexagolab/tests/mocks"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -16,8 +18,7 @@ import (
 func TestCreateUser_Success(t *testing.T) {
 	repo := mocks.NewInMemoryUserRepo()
 	cache := &mocks.DummyCache{}
-	events := &mocks.DummyPublisher{}
-	service := NewUserService(repo, cache, events, zap.NewNop())
+	service := NewUserService(repo, cache, zap.NewNop())
 
 	user, err := service.CreateUser(context.Background(), "test@example.com", "Pepe", time.Date(1990, 5, 10, 0, 0, 0, 0, time.UTC))
 	assert.NoError(t, err)
@@ -34,12 +35,11 @@ func TestCreateUser_Success(t *testing.T) {
 func TestCreateUser_AlreadyExists(t *testing.T) {
 	repo := mocks.NewInMemoryUserRepo()
 	cache := &mocks.DummyCache{}
-	events := &mocks.DummyPublisher{}
-	service := NewUserService(repo, cache, events, zap.NewNop())
+	service := NewUserService(repo, cache, zap.NewNop())
 
 	user, _ := service.CreateUser(context.Background(), "dup@example.com", "Juan", time.Now())
 	// Intentar crear de nuevo con el mismo ID usando repo directamente
-	err := repo.Create(context.Background(), user, domain.OutboxEvent{
+	err := repo.Create(context.Background(), user, sharedDomain.OutboxEvent{
 		ID:            uuid.New(),
 		AggregateType: "User",
 		AggregateID:   user.ID.String(),
@@ -47,24 +47,22 @@ func TestCreateUser_AlreadyExists(t *testing.T) {
 		Payload:       map[string]interface{}{"email": user.Email},
 		CreatedAt:     time.Now(),
 	})
-	assert.ErrorIs(t, err, domain.ErrUserAlreadyExists)
+	assert.ErrorIs(t, err, userDomain.ErrUserAlreadyExists)
 }
 
 func TestGetUser_NotFound(t *testing.T) {
 	repo := mocks.NewInMemoryUserRepo()
 	cache := &mocks.DummyCache{}
-	events := &mocks.DummyPublisher{}
-	service := NewUserService(repo, cache, events, zap.NewNop())
+	service := NewUserService(repo, cache, zap.NewNop())
 
 	_, err := service.GetUser(context.Background(), uuid.New())
-	assert.ErrorIs(t, err, domain.ErrUserNotFound)
+	assert.ErrorIs(t, err, userDomain.ErrUserNotFound)
 }
 
 func TestUpdateUser_Success(t *testing.T) {
 	repo := mocks.NewInMemoryUserRepo()
 	cache := &mocks.DummyCache{}
-	events := &mocks.DummyPublisher{}
-	service := NewUserService(repo, cache, events, zap.NewNop())
+	service := NewUserService(repo, cache, zap.NewNop())
 
 	user, _ := service.CreateUser(context.Background(), "update@example.com", "Ana", time.Now())
 	user.Nombre = "Ana Actualizada"
@@ -85,8 +83,7 @@ func TestUpdateUser_Success(t *testing.T) {
 func TestDeleteUser_Success(t *testing.T) {
 	repo := mocks.NewInMemoryUserRepo()
 	cache := &mocks.DummyCache{}
-	events := &mocks.DummyPublisher{}
-	service := NewUserService(repo, cache, events, zap.NewNop())
+	service := NewUserService(repo, cache, zap.NewNop())
 
 	user, _ := service.CreateUser(context.Background(), "delete@example.com", "Borrar", time.Now())
 
@@ -95,7 +92,7 @@ func TestDeleteUser_Success(t *testing.T) {
 
 	// Verificar que el usuario fue eliminado
 	_, err = repo.GetByID(context.Background(), user.ID)
-	assert.ErrorIs(t, err, domain.ErrUserNotFound)
+	assert.ErrorIs(t, err, userDomain.ErrUserNotFound)
 
 	// ✅ Verificar que se creó un evento Outbox adicional
 	assert.Len(t, repo.Outbox, 2)
@@ -106,17 +103,17 @@ func TestDeleteUser_Success(t *testing.T) {
 // -------------------- GetUser con Cache --------------------
 func TestGetUser_CacheHit(t *testing.T) {
 	id := uuid.New()
-	user := &domain.User{
+	user := &userDomain.User{
 		ID:     id,
 		Email:  "cache@example.com",
 		Nombre: "CacheUser",
 	}
 
 	cache := mocks.NewDummyCache()
-	cache.SetForTest(domain.CacheKeyByID(id), user) // método de test que inserta directamente
+	cache.SetForTest(userDomain.UserCacheKeyByID(id), user) // método de test que inserta directamente
 
 	repo := mocks.NewInMemoryUserRepo()
-	service := NewUserService(repo, cache, nil, zap.NewNop())
+	service := NewUserService(repo, cache, zap.NewNop())
 
 	u, err := service.GetUser(context.Background(), id)
 	assert.NoError(t, err)
@@ -126,17 +123,17 @@ func TestGetUser_CacheHit(t *testing.T) {
 
 func TestGetUser_CacheMiss(t *testing.T) {
 	id := uuid.New()
-	user := &domain.User{
+	user := &userDomain.User{
 		ID:     id,
 		Email:  "miss@example.com",
 		Nombre: "MissUser",
 	}
 
 	repo := mocks.NewInMemoryUserRepo()
-	repo.Create(context.Background(), user, domain.OutboxEvent{})
+	repo.Create(context.Background(), user, sharedDomain.OutboxEvent{})
 	cache := mocks.NewDummyCache() // cache vacía
 
-	service := NewUserService(repo, cache, nil, zap.NewNop())
+	service := NewUserService(repo, cache, zap.NewNop())
 
 	u, _ := service.GetUser(context.Background(), id)
 	assert.NotNil(t, u)
@@ -147,23 +144,23 @@ func TestGetUser_CacheMiss(t *testing.T) {
 
 func TestListUsersByName(t *testing.T) {
 	repo := mocks.NewInMemoryUserRepo()
-	_ = repo.Create(context.Background(), &domain.User{ID: uuid.New(), Nombre: "Ana"}, domain.OutboxEvent{})
-	_ = repo.Create(context.Background(), &domain.User{ID: uuid.New(), Nombre: "Juan"}, domain.OutboxEvent{})
+	_ = repo.Create(context.Background(), &userDomain.User{ID: uuid.New(), Nombre: "Ana"}, sharedDomain.OutboxEvent{})
+	_ = repo.Create(context.Background(), &userDomain.User{ID: uuid.New(), Nombre: "Juan"}, sharedDomain.OutboxEvent{})
 
-	service := NewUserService(repo, nil, nil, zap.NewNop())
+	service := NewUserService(repo, nil, zap.NewNop())
 
-	criteria := domain.CompositeCriteria{
-		Operator: domain.OpAnd,
-		Criterias: []domain.Criteria{
-			domain.NameLikeCriteria{Name: "Ana"},
+	criteria := sharedDomain.CompositeCriteria{
+		Operator: sharedDomain.OpAnd,
+		Criterias: []sharedDomain.Criteria{
+			userDomain.NameLikeCriteria{Name: "Ana"},
 		},
 	}
 
 	results, err := service.ListUsers(
 		context.Background(),
 		criteria,
-		domain.OffsetPagination{Limit: 10, Offset: 0},
-		domain.Sort{Field: "created_at", Desc: false},
+		sharedQuery.OffsetPagination{Limit: 10, Offset: 0},
+		sharedQuery.Sort{Field: "created_at", Desc: false},
 	)
 	assert.NoError(t, err)
 	assert.Len(t, results, 1)
@@ -173,19 +170,18 @@ func TestListUsersByName(t *testing.T) {
 func TestListUsers(t *testing.T) {
 	repo := mocks.NewInMemoryUserRepo()
 	cache := &mocks.DummyCache{}
-	events := &mocks.DummyPublisher{}
-	service := NewUserService(repo, cache, events, zap.NewNop())
+	service := NewUserService(repo, cache, zap.NewNop())
 
 	user1, _ := service.CreateUser(context.Background(), "a@example.com", "Ana", time.Now())
 	user2, _ := service.CreateUser(context.Background(), "b@example.com", "Bob", time.Now())
 
-	criteria := domain.CompositeCriteria{Operator: domain.OpAnd, Criterias: []domain.Criteria{}}
+	criteria := sharedDomain.CompositeCriteria{Operator: sharedDomain.OpAnd, Criterias: []sharedDomain.Criteria{}}
 
 	users, err := service.ListUsers(
 		context.Background(),
 		criteria,
-		domain.OffsetPagination{Limit: 20, Offset: 0},
-		domain.Sort{Field: "created_at", Desc: false},
+		sharedQuery.OffsetPagination{Limit: 20, Offset: 0},
+		sharedQuery.Sort{Field: "created_at", Desc: false},
 	)
 	assert.NoError(t, err)
 	assert.Len(t, users, 2)
@@ -196,8 +192,7 @@ func TestListUsers(t *testing.T) {
 func TestListAdultUsers(t *testing.T) {
 	repo := mocks.NewInMemoryUserRepo()
 	cache := &mocks.DummyCache{}
-	events := &mocks.DummyPublisher{}
-	service := NewUserService(repo, cache, events, zap.NewNop())
+	service := NewUserService(repo, cache, zap.NewNop())
 
 	// Crear usuarios de distintas edades
 	// BirthDate calculado para que user1 tenga 20 años y user2 tenga 15 años
@@ -207,8 +202,8 @@ func TestListAdultUsers(t *testing.T) {
 
 	users, err := service.ListAdultUsers(
 		context.Background(),
-		domain.OffsetPagination{Limit: 10, Offset: 0},
-		domain.Sort{Field: "created_at", Desc: false},
+		sharedQuery.OffsetPagination{Limit: 10, Offset: 0},
+		sharedQuery.Sort{Field: "created_at", Desc: false},
 	)
 	assert.NoError(t, err)
 
@@ -221,10 +216,10 @@ func TestListAdultUsers(t *testing.T) {
 
 func TestListUsers_PaginationOffsetAndSorting(t *testing.T) {
 	repo := mocks.NewInMemoryUserRepo()
-	service := NewUserService(repo, nil, nil, zap.NewNop())
+	service := NewUserService(repo, nil, zap.NewNop())
 
 	// Crear 5 usuarios con distintos nombres y emails
-	users := []*domain.User{
+	users := []*userDomain.User{
 		{ID: uuid.New(), Nombre: "Ana", Email: "ana@example.com", CreatedAt: time.Now().Add(-5 * time.Hour)},
 		{ID: uuid.New(), Nombre: "Bob", Email: "bob@example.com", CreatedAt: time.Now().Add(-4 * time.Hour)},
 		{ID: uuid.New(), Nombre: "Carlos", Email: "carlos@example.com", CreatedAt: time.Now().Add(-3 * time.Hour)},
@@ -232,17 +227,17 @@ func TestListUsers_PaginationOffsetAndSorting(t *testing.T) {
 		{ID: uuid.New(), Nombre: "Eva", Email: "eva@example.com", CreatedAt: time.Now().Add(-1 * time.Hour)},
 	}
 	for _, u := range users {
-		_ = repo.Create(context.Background(), u, domain.OutboxEvent{})
+		_ = repo.Create(context.Background(), u, sharedDomain.OutboxEvent{})
 	}
 
-	criteria := domain.CompositeCriteria{Operator: domain.OpAnd, Criterias: []domain.Criteria{}}
+	criteria := sharedDomain.CompositeCriteria{Operator: sharedDomain.OpAnd, Criterias: []sharedDomain.Criteria{}}
 
 	// --- 1. Paginación: Offset + Limit ---
 	page1, err := service.ListUsers(
 		context.Background(),
 		criteria,
-		domain.OffsetPagination{Limit: 2, Offset: 0},
-		domain.Sort{Field: "nombre", Desc: false},
+		sharedQuery.OffsetPagination{Limit: 2, Offset: 0},
+		sharedQuery.Sort{Field: "nombre", Desc: false},
 	)
 	assert.NoError(t, err)
 	assert.Len(t, page1, 2)
@@ -252,8 +247,8 @@ func TestListUsers_PaginationOffsetAndSorting(t *testing.T) {
 	page2, err := service.ListUsers(
 		context.Background(),
 		criteria,
-		domain.OffsetPagination{Limit: 2, Offset: 2},
-		domain.Sort{Field: "nombre", Desc: false},
+		sharedQuery.OffsetPagination{Limit: 2, Offset: 2},
+		sharedQuery.Sort{Field: "nombre", Desc: false},
 	)
 	assert.NoError(t, err)
 	assert.Len(t, page2, 2)
@@ -264,8 +259,8 @@ func TestListUsers_PaginationOffsetAndSorting(t *testing.T) {
 	descUsers, err := service.ListUsers(
 		context.Background(),
 		criteria,
-		domain.OffsetPagination{Limit: 5, Offset: 0},
-		domain.Sort{Field: "nombre", Desc: true},
+		sharedQuery.OffsetPagination{Limit: 5, Offset: 0},
+		sharedQuery.Sort{Field: "nombre", Desc: true},
 	)
 	assert.NoError(t, err)
 	assert.Equal(t, "Eva", descUsers[0].Nombre)
@@ -275,17 +270,17 @@ func TestListUsers_PaginationOffsetAndSorting(t *testing.T) {
 	assert.Equal(t, "Ana", descUsers[4].Nombre)
 
 	// --- 3. Filtro combinado + paginación ---
-	filterCriteria := domain.CompositeCriteria{
-		Operator: domain.OpAnd,
-		Criterias: []domain.Criteria{
-			domain.NameLikeCriteria{Name: "a"}, // Ana, Carlos, Dave, Eva
+	filterCriteria := sharedDomain.CompositeCriteria{
+		Operator: sharedDomain.OpAnd,
+		Criterias: []sharedDomain.Criteria{
+			userDomain.NameLikeCriteria{Name: "a"}, // Ana, Carlos, Dave, Eva
 		},
 	}
 	filteredPage, err := service.ListUsers(
 		context.Background(),
 		filterCriteria,
-		domain.OffsetPagination{Limit: 2, Offset: 1},
-		domain.Sort{Field: "nombre", Desc: false},
+		sharedQuery.OffsetPagination{Limit: 2, Offset: 1},
+		sharedQuery.Sort{Field: "nombre", Desc: false},
 	)
 	assert.NoError(t, err)
 	assert.Len(t, filteredPage, 2)
@@ -296,8 +291,8 @@ func TestListUsers_PaginationOffsetAndSorting(t *testing.T) {
 	outOfRange, err := service.ListUsers(
 		context.Background(),
 		criteria,
-		domain.OffsetPagination{Limit: 2, Offset: 10},
-		domain.Sort{Field: "nombre", Desc: false},
+		sharedQuery.OffsetPagination{Limit: 2, Offset: 10},
+		sharedQuery.Sort{Field: "nombre", Desc: false},
 	)
 	assert.NoError(t, err)
 	assert.Len(t, outOfRange, 0)
@@ -305,10 +300,10 @@ func TestListUsers_PaginationOffsetAndSorting(t *testing.T) {
 
 func TestListUsers_CursorPagination(t *testing.T) {
 	repo := mocks.NewInMemoryUserRepo()
-	service := NewUserService(repo, nil, nil, zap.NewNop())
+	service := NewUserService(repo, nil, zap.NewNop())
 
 	// Crear 5 usuarios con distintos nombres y created_at
-	users := []*domain.User{
+	users := []*userDomain.User{
 		{ID: uuid.New(), Nombre: "Ana", CreatedAt: time.Now().Add(-5 * time.Hour)},
 		{ID: uuid.New(), Nombre: "Bob", CreatedAt: time.Now().Add(-4 * time.Hour)},
 		{ID: uuid.New(), Nombre: "Carlos", CreatedAt: time.Now().Add(-3 * time.Hour)},
@@ -316,13 +311,13 @@ func TestListUsers_CursorPagination(t *testing.T) {
 		{ID: uuid.New(), Nombre: "Eva", CreatedAt: time.Now().Add(-1 * time.Hour)},
 	}
 	for _, u := range users {
-		_ = repo.Create(context.Background(), u, domain.OutboxEvent{})
+		_ = repo.Create(context.Background(), u, sharedDomain.OutboxEvent{})
 	}
 
-	criteria := domain.CompositeCriteria{Operator: domain.OpAnd, Criterias: []domain.Criteria{}}
+	criteria := sharedDomain.CompositeCriteria{Operator: sharedDomain.OpAnd, Criterias: []sharedDomain.Criteria{}}
 
 	// Helper para construir cursor compuesto
-	buildCursor := func(u *domain.User, sortField string) string {
+	buildCursor := func(u *userDomain.User, sortField string) string {
 		var val string
 		switch sortField {
 		case "nombre":
@@ -342,13 +337,13 @@ func TestListUsers_CursorPagination(t *testing.T) {
 	page1, err := service.ListUsers(
 		context.Background(),
 		criteria,
-		domain.CursorPagination{
+		sharedQuery.CursorPagination{
 			Limit:     2,
 			Cursor:    cursor,
 			SortField: "created_at",
 			SortDesc:  false,
 		},
-		domain.Sort{Field: "created_at", Desc: false},
+		sharedQuery.Sort{Field: "created_at", Desc: false},
 	)
 	assert.NoError(t, err)
 	assert.Len(t, page1, 2)
@@ -360,13 +355,13 @@ func TestListUsers_CursorPagination(t *testing.T) {
 	page2, err := service.ListUsers(
 		context.Background(),
 		criteria,
-		domain.CursorPagination{
+		sharedQuery.CursorPagination{
 			Limit:     2,
 			Cursor:    cursor,
 			SortField: "created_at",
 			SortDesc:  false,
 		},
-		domain.Sort{Field: "created_at", Desc: false},
+		sharedQuery.Sort{Field: "created_at", Desc: false},
 	)
 	assert.NoError(t, err)
 	assert.Len(t, page2, 2)
@@ -378,13 +373,13 @@ func TestListUsers_CursorPagination(t *testing.T) {
 	page3, err := service.ListUsers(
 		context.Background(),
 		criteria,
-		domain.CursorPagination{
+		sharedQuery.CursorPagination{
 			Limit:     2,
 			Cursor:    cursor,
 			SortField: "created_at",
 			SortDesc:  false,
 		},
-		domain.Sort{Field: "created_at", Desc: false},
+		sharedQuery.Sort{Field: "created_at", Desc: false},
 	)
 	assert.NoError(t, err)
 	assert.Len(t, page3, 1)
@@ -395,13 +390,13 @@ func TestListUsers_CursorPagination(t *testing.T) {
 	descPage, err := service.ListUsers(
 		context.Background(),
 		criteria,
-		domain.CursorPagination{
+		sharedQuery.CursorPagination{
 			Limit:     3,
 			Cursor:    cursor,
 			SortField: "created_at",
 			SortDesc:  true,
 		},
-		domain.Sort{Field: "created_at", Desc: true},
+		sharedQuery.Sort{Field: "created_at", Desc: true},
 	)
 	assert.NoError(t, err)
 	assert.Len(t, descPage, 3)

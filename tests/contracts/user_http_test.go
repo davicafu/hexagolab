@@ -9,13 +9,13 @@ import (
 	"time"
 
 	"github.com/davicafu/hexagolab/internal/user/application"
-	"github.com/davicafu/hexagolab/internal/user/domain"
+	userDomain "github.com/davicafu/hexagolab/internal/user/domain"
+	sharedDomain "github.com/davicafu/hexagolab/shared/domain"
+	"github.com/davicafu/hexagolab/shared/events"
 	"github.com/davicafu/hexagolab/tests/mocks"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
-
-	"github.com/davicafu/hexagolab/internal/shared/events"
 )
 
 // userHTTPResponse define el formato que esperamos en las respuestas JSON
@@ -31,20 +31,19 @@ func TestGetUser_HTTPContract(t *testing.T) {
 	// Mock repository que simula un usuario existente
 	repo := mocks.NewInMemoryUserRepo()
 	cache := &mocks.DummyCache{}
-	events := &mocks.DummyPublisher{}
 
-	service := application.NewUserService(repo, cache, events, zap.NewNop())
+	service := application.NewUserService(repo, cache, zap.NewNop())
 
 	// Crear usuario de prueba
 	userID := uuid.New()
-	u := &domain.User{
+	u := &userDomain.User{
 		ID:        userID,
 		Email:     "test@example.com",
 		Nombre:    "Test User",
 		BirthDate: time.Date(1990, 1, 1, 0, 0, 0, 0, time.UTC),
 		CreatedAt: time.Now(),
 	}
-	assert.NoError(t, repo.Create(context.Background(), u, domain.OutboxEvent{}))
+	assert.NoError(t, repo.Create(context.Background(), u, sharedDomain.OutboxEvent{}))
 
 	// Crear handler HTTP simple
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -54,7 +53,7 @@ func TestGetUser_HTTPContract(t *testing.T) {
 
 		user, err := service.GetUser(r.Context(), uid)
 		if err != nil {
-			if err == domain.ErrUserNotFound {
+			if err == userDomain.ErrUserNotFound {
 				http.Error(w, "user not found", http.StatusNotFound)
 				return
 			}

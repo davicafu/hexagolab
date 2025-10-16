@@ -9,7 +9,10 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/davicafu/hexagolab/internal/user/application"
-	"github.com/davicafu/hexagolab/internal/user/domain"
+	userDomain "github.com/davicafu/hexagolab/internal/user/domain"
+	response "github.com/davicafu/hexagolab/pkg/utils"
+	sharedDomain "github.com/davicafu/hexagolab/shared/domain"
+	sharedQuery "github.com/davicafu/hexagolab/shared/platform/query"
 )
 
 // UserHandler encapsula los endpoints HTTP relacionados con User
@@ -45,7 +48,7 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 
 	user, err := h.service.CreateUser(c.Request.Context(), req.Email, req.Nombre, birthDate)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.SendInternalServerError(c, err.Error())
 		return
 	}
 
@@ -63,15 +66,15 @@ func (h *UserHandler) GetUser(c *gin.Context) {
 
 	user, err := h.service.GetUser(c.Request.Context(), id)
 	if err != nil {
-		if err == domain.ErrUserNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		if err == userDomain.ErrUserNotFound {
+			response.SendNotFound(c, "user not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.SendInternalServerError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, user)
+	response.SendSuccess(c, http.StatusOK, user)
 }
 
 // UpdateUser endpoint PUT /users/:id
@@ -96,11 +99,11 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 
 	user, err := h.service.GetUser(c.Request.Context(), id)
 	if err != nil {
-		if err == domain.ErrUserNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		if err == userDomain.ErrUserNotFound {
+			response.SendNotFound(c, "user not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.SendInternalServerError(c, err.Error())
 		return
 	}
 
@@ -113,18 +116,18 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 	if req.BirthDate != nil {
 		bd, err := time.Parse("2006-01-02", *req.BirthDate)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid birth_date format"})
+			response.SendBadRequest(c, "invalid birth_date format")
 			return
 		}
 		user.BirthDate = bd
 	}
 
 	if err := h.service.UpdateUser(c.Request.Context(), user); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.SendInternalServerError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, user)
+	response.SendSuccess(c, http.StatusOK, user)
 }
 
 // DeleteUser endpoint DELETE /users/:id
@@ -137,11 +140,11 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 	}
 
 	if err := h.service.DeleteUser(c.Request.Context(), id); err != nil {
-		if err == domain.ErrUserNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		if err == userDomain.ErrUserNotFound {
+			response.SendNotFound(c, "user not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.SendInternalServerError(c, err.Error())
 		return
 	}
 
@@ -149,20 +152,20 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 }
 
 func (h *UserHandler) ListUsers(c *gin.Context) {
-	var criterias []domain.Criteria
+	var criterias []sharedDomain.Criteria
 
 	// --- Filtros desde query params ---
 	if nombre := c.Query("nombre"); nombre != "" {
-		criterias = append(criterias, domain.NameLikeCriteria{Name: nombre})
+		criterias = append(criterias, userDomain.NameLikeCriteria{Name: nombre})
 	}
 
 	if email := c.Query("email"); email != "" {
-		criterias = append(criterias, domain.EmailCriteria{Email: email})
+		criterias = append(criterias, userDomain.EmailCriteria{Email: email})
 	}
 
 	if idStr := c.Query("id"); idStr != "" {
 		if id, err := uuid.Parse(idStr); err == nil {
-			criterias = append(criterias, domain.IDCriteria{ID: id})
+			criterias = append(criterias, userDomain.IDCriteria{ID: id})
 		}
 	}
 
@@ -179,16 +182,16 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 		}
 	}
 	if min != nil || max != nil {
-		criterias = append(criterias, domain.AgeRangeCriteria{Min: min, Max: max})
+		criterias = append(criterias, userDomain.AgeRangeCriteria{Min: min, Max: max})
 	}
 
-	criteria := domain.CompositeCriteria{
-		Operator:  domain.OpAnd,
+	criteria := sharedDomain.CompositeCriteria{
+		Operator:  sharedDomain.OpAnd,
 		Criterias: criterias,
 	}
 
 	// --- Sort ---
-	sortParam := domain.Sort{
+	sortParam := sharedQuery.Sort{
 		Field: "created_at",
 		Desc:  true,
 	}
@@ -200,7 +203,7 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 	}
 
 	// --- Paginación ---
-	var pagination domain.Pagination
+	var pagination sharedQuery.Pagination
 	limit := 50
 	if limitStr := c.Query("limit"); limitStr != "" {
 		if v, err := strconv.Atoi(limitStr); err == nil {
@@ -209,7 +212,7 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 	}
 
 	if cursor := c.Query("cursor"); cursor != "" {
-		pagination = domain.CursorPagination{
+		pagination = sharedQuery.CursorPagination{
 			Limit:     limit,
 			Cursor:    cursor,
 			SortField: sortParam.Field,
@@ -222,7 +225,7 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 				offset = v
 			}
 		}
-		pagination = domain.OffsetPagination{
+		pagination = sharedQuery.OffsetPagination{
 			Limit:  limit,
 			Offset: offset,
 		}
@@ -230,9 +233,9 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 
 	users, err := h.service.ListUsers(c.Request.Context(), criteria, pagination, sortParam)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		response.SendInternalServerError(c, err.Error())
 		return
 	}
 
-	c.JSON(200, users)
+	response.SendSuccess(c, http.StatusOK, users)
 }

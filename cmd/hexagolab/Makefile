@@ -15,3 +15,6 @@ coverage-html:
 
 clean:
 	rm -f coverage.out coverage.html
+
+build-proto:
+	protoc --go_out=. --go-grpc_out=. proto/task.proto

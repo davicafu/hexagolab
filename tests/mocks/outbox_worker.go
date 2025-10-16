@@ -3,32 +3,38 @@ package mocks
 import (
 	"context"
 
-	"github.com/davicafu/hexagolab/internal/user/domain"
+	sharedDomain "github.com/davicafu/hexagolab/shared/domain"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
 )
 
-// MockRepository simula el repo con outbox
-type MockRepository struct {
+// --- Mocks Correctos ---
+
+// MockOutboxRepository solo implementa la interfaz que el Worker necesita.
+type MockOutboxRepository struct {
 	mock.Mock
 }
 
-func (m *MockRepository) FetchPendingOutbox(ctx context.Context, limit int) ([]domain.OutboxEvent, error) {
+func (m *MockOutboxRepository) FetchPendingOutbox(ctx context.Context, limit int) ([]sharedDomain.OutboxEvent, error) {
 	args := m.Called(ctx, limit)
-	return args.Get(0).([]domain.OutboxEvent), args.Error(1)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]sharedDomain.OutboxEvent), args.Error(1)
 }
 
-func (m *MockRepository) MarkOutboxProcessed(ctx context.Context, id uuid.UUID) error {
+func (m *MockOutboxRepository) MarkOutboxProcessed(ctx context.Context, id uuid.UUID) error {
 	args := m.Called(ctx, id)
 	return args.Error(0)
 }
 
-// MockPublisher simula un publisher
+// MockPublisher simula el publicador de eventos con la firma correcta.
 type MockPublisher struct {
 	mock.Mock
 }
 
-func (m *MockPublisher) Publish(ctx context.Context, eventType string, event interface{}) error {
-	args := m.Called(ctx, eventType, event)
+// ✅ Firma del método Publish corregida (sin 'topic').
+func (m *MockPublisher) Publish(ctx context.Context, event interface{}) error {
+	args := m.Called(ctx, event)
 	return args.Error(0)
 }

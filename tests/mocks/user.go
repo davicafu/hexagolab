@@ -10,30 +10,32 @@ import (
 	"sync"
 	"time"
 
-	"github.com/davicafu/hexagolab/internal/user/domain"
+	userDomain "github.com/davicafu/hexagolab/internal/user/domain"
+	sharedDomain "github.com/davicafu/hexagolab/shared/domain"
+	sharedQuery "github.com/davicafu/hexagolab/shared/platform/query"
 	"github.com/google/uuid"
 )
 
 // InMemoryUserRepo simula UserRepository con outbox incluido.
 type InMemoryUserRepo struct {
-	Users  map[uuid.UUID]*domain.User
-	Outbox []domain.OutboxEvent
+	Users  map[uuid.UUID]*userDomain.User
+	Outbox []sharedDomain.OutboxEvent
 	mu     sync.Mutex
 }
 
 func NewInMemoryUserRepo() *InMemoryUserRepo {
 	return &InMemoryUserRepo{
-		Users:  make(map[uuid.UUID]*domain.User),
-		Outbox: []domain.OutboxEvent{},
+		Users:  make(map[uuid.UUID]*userDomain.User),
+		Outbox: []sharedDomain.OutboxEvent{},
 	}
 }
 
 // Create con outbox
-func (r *InMemoryUserRepo) Create(ctx context.Context, u *domain.User, evt domain.OutboxEvent) error {
+func (r *InMemoryUserRepo) Create(ctx context.Context, u *userDomain.User, evt sharedDomain.OutboxEvent) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.Users[u.ID]; ok {
-		return domain.ErrUserAlreadyExists
+		return userDomain.ErrUserAlreadyExists
 	}
 	r.Users[u.ID] = u
 	r.Outbox = append(r.Outbox, evt)
@@ -41,22 +43,22 @@ func (r *InMemoryUserRepo) Create(ctx context.Context, u *domain.User, evt domai
 }
 
 // GetByID
-func (r *InMemoryUserRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
+func (r *InMemoryUserRepo) GetByID(ctx context.Context, id uuid.UUID) (*userDomain.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	u, ok := r.Users[id]
 	if !ok {
-		return nil, domain.ErrUserNotFound
+		return nil, userDomain.ErrUserNotFound
 	}
 	return u, nil
 }
 
 // Update con outbox
-func (r *InMemoryUserRepo) Update(ctx context.Context, u *domain.User, evt domain.OutboxEvent) error {
+func (r *InMemoryUserRepo) Update(ctx context.Context, u *userDomain.User, evt sharedDomain.OutboxEvent) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.Users[u.ID]; !ok {
-		return domain.ErrUserNotFound
+		return userDomain.ErrUserNotFound
 	}
 	r.Users[u.ID] = u
 	r.Outbox = append(r.Outbox, evt)
@@ -64,11 +66,11 @@ func (r *InMemoryUserRepo) Update(ctx context.Context, u *domain.User, evt domai
 }
 
 // DeleteByID con outbox
-func (r *InMemoryUserRepo) DeleteByID(ctx context.Context, id uuid.UUID, evt domain.OutboxEvent) error {
+func (r *InMemoryUserRepo) DeleteByID(ctx context.Context, id uuid.UUID, evt sharedDomain.OutboxEvent) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.Users[id]; !ok {
-		return domain.ErrUserNotFound
+		return userDomain.ErrUserNotFound
 	}
 	delete(r.Users, id)
 	r.Outbox = append(r.Outbox, evt)
@@ -78,14 +80,14 @@ func (r *InMemoryUserRepo) DeleteByID(ctx context.Context, id uuid.UUID, evt dom
 // ListByCriteria en el mock (mocks package)
 func (r *InMemoryUserRepo) ListByCriteria(
 	ctx context.Context,
-	criteria domain.Criteria,
-	pagination domain.Pagination,
-	s domain.Sort, // renombrado para no colisionar con package sort
-) ([]*domain.User, error) {
+	criteria sharedDomain.Criteria,
+	pagination sharedQuery.Pagination,
+	s sharedQuery.Sort, // renombrado para no colisionar con package sort
+) ([]*userDomain.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	var list []*domain.User
+	var list []*userDomain.User
 	for _, u := range r.Users {
 		// Si no hay criterio, consideramos que coincide todo
 		if criteria == nil {
@@ -135,10 +137,10 @@ func (r *InMemoryUserRepo) ListByCriteria(
 
 	// paginación
 	switch p := pagination.(type) {
-	case domain.OffsetPagination:
+	case sharedQuery.OffsetPagination:
 		start := p.Offset
 		if start > len(list) {
-			return []*domain.User{}, nil
+			return []*userDomain.User{}, nil
 		}
 		end := start + p.Limit
 		if end > len(list) {
@@ -146,7 +148,7 @@ func (r *InMemoryUserRepo) ListByCriteria(
 		}
 		return list[start:end], nil
 
-	case domain.CursorPagination:
+	case sharedQuery.CursorPagination:
 		// 1️⃣ Ordenar la lista según sortField y SortDesc, usando ID como tie-breaker
 		sort.SliceStable(list, func(i, j int) bool {
 			var vi, vj string
@@ -178,7 +180,7 @@ func (r *InMemoryUserRepo) ListByCriteria(
 		})
 
 		// 2️⃣ Filtrar según cursor compuesto
-		filtered := []*domain.User{}
+		filtered := []*userDomain.User{}
 		startCollect := p.Cursor == ""
 		var cursorSort, cursorID string
 		if p.Cursor != "" {
@@ -230,7 +232,7 @@ func (r *InMemoryUserRepo) ListByCriteria(
 }
 
 // matchCriterion evalúa un domain.Criterion contra un usuario en memoria.
-func matchCriterion(u *domain.User, crit domain.Criterion) bool {
+func matchCriterion(u *userDomain.User, crit sharedDomain.Criterion) bool {
 	op := strings.ToUpper(strings.TrimSpace(string(crit.Op)))
 	field := crit.Field
 
@@ -315,14 +317,14 @@ func matchCriterion(u *domain.User, crit domain.Criterion) bool {
 // ------------------- Outbox -------------------
 
 // FetchPendingOutbox
-func (r *InMemoryUserRepo) FetchPendingOutbox(ctx context.Context, limit int) ([]domain.OutboxEvent, error) {
+func (r *InMemoryUserRepo) FetchPendingOutbox(ctx context.Context, limit int) ([]sharedDomain.OutboxEvent, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if limit > len(r.Outbox) {
 		limit = len(r.Outbox)
 	}
 	pending := r.Outbox[:limit]
-	return append([]domain.OutboxEvent(nil), pending...), nil
+	return append([]sharedDomain.OutboxEvent(nil), pending...), nil
 }
 
 // MarkOutboxProcessed
@@ -336,28 +338,28 @@ func (r *InMemoryUserRepo) MarkOutboxProcessed(ctx context.Context, id uuid.UUID
 			return nil
 		}
 	}
-	return domain.ErrUserNotFound
+	return userDomain.ErrUserNotFound
 }
 
 // ------------------- Cache -------------------
 // DummyCache simula una cache en memoria
 type DummyCache struct {
-	store map[string]*domain.User
+	store map[string]*userDomain.User
 	mu    sync.Mutex
 }
 
 // NewDummyCache crea un DummyCache inicializado
 func NewDummyCache() *DummyCache {
 	return &DummyCache{
-		store: make(map[string]*domain.User),
+		store: make(map[string]*userDomain.User),
 	}
 }
 
-func (c *DummyCache) SetForTest(key string, u *domain.User) {
+func (c *DummyCache) SetForTest(key string, u *userDomain.User) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.store == nil {
-		c.store = make(map[string]*domain.User)
+		c.store = make(map[string]*userDomain.User)
 	}
 	c.store[key] = u
 }
@@ -371,7 +373,7 @@ func (c *DummyCache) Get(ctx context.Context, key string, dest interface{}) (boo
 		return false, nil
 	}
 
-	userPtr, ok := dest.(*domain.User)
+	userPtr, ok := dest.(*userDomain.User)
 	if !ok {
 		return false, nil
 	}
@@ -385,10 +387,10 @@ func (c *DummyCache) Set(ctx context.Context, key string, val interface{}, ttlSe
 	defer c.mu.Unlock()
 
 	if c.store == nil {
-		c.store = make(map[string]*domain.User)
+		c.store = make(map[string]*userDomain.User)
 	}
 
-	u, ok := val.(*domain.User)
+	u, ok := val.(*userDomain.User)
 	if !ok {
 		return nil
 	}

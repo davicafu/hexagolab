@@ -16,9 +16,8 @@ type UserCreated struct {
 }
 
 type UserUpdated struct {
-	ID     uuid.UUID `json:"id"`
-	Email  string    `json:"email"`
-	Nombre string    `json:"nombre"`
-
+	ID        uuid.UUID `json:"id"`
+	Email     string    `json:"email"`
+	Nombre    string    `json:"nombre"`
 	BirthDate time.Time `json:"birth_date"`
 }

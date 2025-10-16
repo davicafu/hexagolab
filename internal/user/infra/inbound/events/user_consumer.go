@@ -3,12 +3,15 @@ package events
 import (
 	"context"
 	"encoding/json"
+	"errors" // Necesario para la comprobación de errores
 	"time"
 
-	"github.com/davicafu/hexagolab/internal/shared/events"
-	"github.com/davicafu/hexagolab/internal/user/domain"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+
+	userDomain "github.com/davicafu/hexagolab/internal/user/domain"
+	sharedEvents "github.com/davicafu/hexagolab/shared/events"
+	sharedUtils "github.com/davicafu/hexagolab/shared/utils"
 )
 
 type UserEvent struct {
@@ -17,46 +20,60 @@ type UserEvent struct {
 }
 
 type UserService interface {
-	CreateUser(ctx context.Context, email, nombre string, birthDate time.Time) (*domain.User, error)
-	UpdateUser(ctx context.Context, u *domain.User) error
-	GetUser(ctx context.Context, id uuid.UUID) (*domain.User, error)
+	CreateUser(ctx context.Context, email, nombre string, birthDate time.Time) (*userDomain.User, error)
+	UpdateUser(ctx context.Context, u *userDomain.User) error
+	GetUser(ctx context.Context, id uuid.UUID) (*userDomain.User, error)
 }
 
+// UserConsumer (sin el campo batchSize)
 type UserConsumer struct {
-	service   UserService
-	batchSize int
-	log       *zap.Logger
+	service UserService
+	log     *zap.Logger
 }
 
-func NewUserConsumer(service UserService, batch int, logger *zap.Logger) *UserConsumer {
+// NewUserConsumer (sin el parámetro batchSize)
+func NewUserConsumer(service UserService, logger *zap.Logger) *UserConsumer {
 	return &UserConsumer{
-		service:   service,
-		batchSize: batch,
-		log:       logger,
+		service: service,
+		log:     logger,
 	}
 }
 
 func (c *UserConsumer) HandleMessage(ctx context.Context, key string, payload []byte) {
-
-	var base events.IntegrationEvent
+	var base sharedEvents.IntegrationEvent
 	if err := json.Unmarshal(payload, &base); err != nil {
-		c.log.Warn("Failed to unmarshal integration event",
-			zap.String("key", key),
-			zap.Error(err),
-		)
+		c.log.Warn("Failed to unmarshal integration event", zap.String("key", key), zap.Error(err))
 		return
 	}
 
+	// ✅ Usamos las constantes en lugar de strings
 	switch base.Type {
-	case "UserCreated":
-		unmarshalAndHandle[events.UserCreated](c.log, base.Data, func(evt events.UserCreated) {
+	case userDomain.UserCreated:
+		sharedUtils.UnmarshalAndHandle[sharedEvents.UserCreated](c.log, base.Data, func(evt sharedEvents.UserCreated) {
 			c.withContext(ctx, evt.ID, func(ctxUser context.Context) error {
-				_, err := c.service.CreateUser(ctxUser, evt.Email, evt.Nombre, evt.BirthDate)
+
+				// ✅ LÓGICA DE IDEMPOTENCIA: "Buscar antes de Crear"
+				// 1. Comprobamos si el usuario ya existe.
+				_, err := c.service.GetUser(ctxUser, evt.ID)
+				if err == nil {
+					// El usuario ya existe, no hacemos nada. Es un evento duplicado.
+					c.log.Info("Evento 'UserCreated' duplicado ignorado", zap.String("user_id", evt.ID.String()))
+					return nil
+				}
+				// Si el error no es "no encontrado", es un error real que debemos devolver.
+				if !errors.Is(err, userDomain.ErrUserNotFound) {
+					return err
+				}
+
+				// 2. Si no existe, lo creamos.
+				_, err = c.service.CreateUser(ctxUser, evt.Email, evt.Nombre, evt.BirthDate)
 				return err
+
 			}, "User created via event", evt)
 		})
-	case "UserUpdated":
-		unmarshalAndHandle[events.UserUpdated](c.log, base.Data, func(evt events.UserUpdated) {
+
+	case userDomain.UserUpdated:
+		sharedUtils.UnmarshalAndHandle[sharedEvents.UserUpdated](c.log, base.Data, func(evt sharedEvents.UserUpdated) {
 			c.withContext(ctx, evt.ID, func(ctxUser context.Context) error {
 				user, err := c.service.GetUser(ctxUser, evt.ID)
 				if err != nil {
@@ -68,29 +85,24 @@ func (c *UserConsumer) HandleMessage(ctx context.Context, key string, payload []
 				return c.service.UpdateUser(ctxUser, user)
 			}, "User updated via event", evt)
 		})
+
 	default:
 		c.log.Warn("Unknown event type", zap.String("type", base.Type))
 	}
 }
 
-// Helper genérico para deserializar JSON y ejecutar un handler
-func unmarshalAndHandle[T any](log *zap.Logger, data json.RawMessage, handler func(T)) {
-
-	var evt T
-	if err := json.Unmarshal(data, &evt); err != nil {
-		log.Warn("Failed to unmarshal event data", zap.Error(err))
-		return
-	}
-	handler(evt)
-}
-
 // Helper para ejecutar acción con contexto limitado y log
 func (c *UserConsumer) withContext(ctx context.Context, id uuid.UUID, action func(ctx context.Context) error, successMsg string, evt interface{}) {
-
 	ctxUser, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
 
 	if err := action(ctxUser); err != nil {
+		// ✅ Si el error es que ya existe, lo tratamos como un éxito (alternativa de idempotencia)
+		if errors.Is(err, userDomain.ErrUserAlreadyExists) {
+			c.log.Info("Evento 'UserCreated' duplicado gestionado por la BBDD", zap.String("user_id", id.String()))
+			return
+		}
+
 		c.log.Warn("Failed to process user event",
 			zap.String("user_id", id.String()),
 			zap.Any("event", evt),
@@ -104,16 +116,19 @@ func (c *UserConsumer) withContext(ctx context.Context, id uuid.UUID, action fun
 	}
 }
 
-func BackgroundConsumerChan(ctx context.Context, ch <-chan UserEvent, consumer *UserConsumer) {
-
+func BackgroundConsumerChan(ctx context.Context, ch <-chan interface{}, consumer *UserConsumer) {
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				consumer.log.Info("UserConsumer stopped")
 				return
-			case evt := <-ch:
-				consumer.HandleMessage(ctx, evt.Key, evt.Payload)
+			case msg := <-ch:
+				// ✅ Esperamos recibir []byte, que es lo que el bus envía.
+				if payload, ok := msg.([]byte); ok {
+					// Le pasamos los bytes directamente al handler.
+					consumer.HandleMessage(ctx, "", payload)
+				}
 			}
 		}
 	}()

@@ -1,11 +1,5 @@
 package domain
 
-import (
-	"time"
-
-	"github.com/google/uuid"
-)
-
 // ---------------- Operadores ----------------
 
 type Operator string
@@ -41,61 +35,6 @@ type Criterion struct {
 // Criteria permite transformar filtros a condiciones neutrales
 type Criteria interface {
 	ToConditions() []Criterion
-}
-
-// ---------------- Implementaciones concretas ----------------
-
-// Filtrado por ID exacto
-type IDCriteria struct {
-	ID uuid.UUID
-}
-
-func (c IDCriteria) ToConditions() []Criterion {
-	return []Criterion{{Field: "id", Op: OpEq, Value: c.ID}}
-}
-
-// Filtrado por email exacto
-type EmailCriteria struct {
-	Email string
-}
-
-func (c EmailCriteria) ToConditions() []Criterion {
-	return []Criterion{{Field: "email", Op: OpEq, Value: c.Email}}
-}
-
-// Filtrado por nombre LIKE / ILIKE
-type NameLikeCriteria struct {
-	Name string
-}
-
-func (c NameLikeCriteria) ToConditions() []Criterion {
-	return []Criterion{{Field: "nombre", Op: OpILike, Value: "%" + c.Name + "%"}}
-}
-
-// Filtrado por rango de edad
-type AgeRangeCriteria struct {
-	Min *int
-	Max *int
-}
-
-func (c AgeRangeCriteria) ToConditions() []Criterion {
-	var now time.Time = time.Now()
-	var conds []Criterion
-	if c.Min != nil {
-		conds = append(conds, Criterion{
-			Field: "birth_date",
-			Op:    OpLte,
-			Value: now.AddDate(-*c.Min, 0, 0),
-		})
-	}
-	if c.Max != nil {
-		conds = append(conds, Criterion{
-			Field: "birth_date",
-			Op:    OpGte,
-			Value: now.AddDate(-*c.Max, 0, 0),
-		})
-	}
-	return conds
 }
 
 // ---------------- Composite Criteria ----------------

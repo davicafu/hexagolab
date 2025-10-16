@@ -7,14 +7,16 @@ import (
 )
 
 type Config struct {
-	SQLitePath     string
-	RedisAddr      string
-	KafkaBrokers   []string
-	KafkaTopicUser string
-	CacheTTL       time.Duration
-	OutboxPeriod   time.Duration
-	OutboxLimit    int
-	HTTPPort       string
+	SQLitePath      string
+	RedisAddr       string
+	KafkaBrokers    []string
+	KafkaTopicUser  string
+	CacheTTL        time.Duration
+	OutboxPeriod    time.Duration
+	OutboxLimit     int
+	HTTPPort        string
+	UseKafka        bool
+	LocalDeployment bool
 }
 
 func LoadConfig() *Config {
@@ -28,13 +30,15 @@ func LoadConfig() *Config {
 	kafkaBrokers := strings.Split(getEnv("KAFKA_BROKERS", "localhost:9092"), ",")
 
 	return &Config{
-		SQLitePath:     getEnv("SQLITE_PATH", "./hexagolab_users.db"),
-		RedisAddr:      getEnv("REDIS_ADDR", "localhost:6379"),
-		KafkaBrokers:   kafkaBrokers,
-		KafkaTopicUser: getEnv("KAFKA_TOPIC", "user-events"),
-		CacheTTL:       5 * time.Minute,
-		OutboxPeriod:   2 * time.Second,
-		OutboxLimit:    10,
-		HTTPPort:       getEnv("HTTP_PORT", "8080"),
+		SQLitePath:      getEnv("SQLITE_PATH", "./hexagolab_users.db"),
+		RedisAddr:       getEnv("REDIS_ADDR", "localhost:6379"),
+		KafkaBrokers:    kafkaBrokers,
+		KafkaTopicUser:  getEnv("KAFKA_TOPIC", "user-events"),
+		CacheTTL:        5 * time.Minute,
+		OutboxPeriod:    2 * time.Second,
+		OutboxLimit:     10,
+		HTTPPort:        getEnv("HTTP_PORT", "8080"),
+		UseKafka:        getEnv("USE_KAFKA", "false") == "true",
+		LocalDeployment: getEnv("LOCAL_DEPLOYMENT", "false") == "true",
 	}
 }

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davicafu/hexagolab/internal/shared/events"
-	"github.com/davicafu/hexagolab/internal/user/domain"
+	userDomain "github.com/davicafu/hexagolab/internal/user/domain"
 	userConsumer "github.com/davicafu/hexagolab/internal/user/infra/inbound/events"
+	"github.com/davicafu/hexagolab/shared/events"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
@@ -16,21 +16,21 @@ import (
 
 // --- FakeUserService para pruebas ---
 type FakeUserService struct {
-	Created []*domain.User
-	Updated []*domain.User
-	Users   map[uuid.UUID]*domain.User
+	Created []*userDomain.User
+	Updated []*userDomain.User
+	Users   map[uuid.UUID]*userDomain.User
 }
 
 func NewFakeUserService() *FakeUserService {
 	return &FakeUserService{
-		Created: []*domain.User{},
-		Updated: []*domain.User{},
-		Users:   make(map[uuid.UUID]*domain.User),
+		Created: []*userDomain.User{},
+		Updated: []*userDomain.User{},
+		Users:   make(map[uuid.UUID]*userDomain.User),
 	}
 }
 
-func (f *FakeUserService) CreateUser(ctx context.Context, email, nombre string, birthDate time.Time) (*domain.User, error) {
-	u := &domain.User{
+func (f *FakeUserService) CreateUser(ctx context.Context, email, nombre string, birthDate time.Time) (*userDomain.User, error) {
+	u := &userDomain.User{
 		ID:        uuid.New(),
 		Email:     email,
 		Nombre:    nombre,
@@ -41,15 +41,15 @@ func (f *FakeUserService) CreateUser(ctx context.Context, email, nombre string, 
 	return u, nil
 }
 
-func (f *FakeUserService) GetUser(ctx context.Context, id uuid.UUID) (*domain.User, error) {
+func (f *FakeUserService) GetUser(ctx context.Context, id uuid.UUID) (*userDomain.User, error) {
 	u, ok := f.Users[id]
 	if !ok {
-		return nil, domain.ErrUserNotFound
+		return nil, userDomain.ErrUserNotFound
 	}
 	return u, nil
 }
 
-func (f *FakeUserService) UpdateUser(ctx context.Context, u *domain.User) error {
+func (f *FakeUserService) UpdateUser(ctx context.Context, u *userDomain.User) error {
 	f.Updated = append(f.Updated, u)
 	f.Users[u.ID] = u
 	return nil
@@ -59,7 +59,7 @@ func (f *FakeUserService) UpdateUser(ctx context.Context, u *domain.User) error 
 func TestUserConsumer_HandleMessage(t *testing.T) {
 	ctx := context.Background()
 	fakeService := NewFakeUserService()
-	consumer := userConsumer.NewUserConsumer(fakeService, 10, zap.NewNop())
+	consumer := userConsumer.NewUserConsumer(fakeService, zap.NewNop())
 
 	// Helper para crear IntegrationEvent con Data
 	buildEvent := func(eventType string, data interface{}) []byte {

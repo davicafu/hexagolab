@@ -8,16 +8,16 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
-type RedisUserCache struct {
+type RedisCache struct {
 	client *redis.Client
 	ttl    time.Duration
 }
 
-func NewRedisUserCache(client *redis.Client, ttl time.Duration) *RedisUserCache {
-	return &RedisUserCache{client: client, ttl: ttl}
+func NewRedisCache(client *redis.Client, ttl time.Duration) *RedisCache {
+	return &RedisCache{client: client, ttl: ttl}
 }
 
-func (c *RedisUserCache) Get(ctx context.Context, key string, dest interface{}) (bool, error) {
+func (c *RedisCache) Get(ctx context.Context, key string, dest interface{}) (bool, error) {
 	data, err := c.client.Get(ctx, key).Bytes()
 	if err != nil {
 		if err == redis.Nil {
@@ -31,7 +31,7 @@ func (c *RedisUserCache) Get(ctx context.Context, key string, dest interface{}) 
 	return true, nil
 }
 
-func (c *RedisUserCache) Set(ctx context.Context, key string, val interface{}, ttlSecs int) error {
+func (c *RedisCache) Set(ctx context.Context, key string, val interface{}, ttlSecs int) error {
 	data, err := json.Marshal(val)
 	if err != nil {
 		return err
@@ -39,6 +39,6 @@ func (c *RedisUserCache) Set(ctx context.Context, key string, val interface{}, t
 	return c.client.Set(ctx, key, data, time.Duration(ttlSecs)*time.Second).Err()
 }
 
-func (c *RedisUserCache) Delete(ctx context.Context, key string) error {
+func (c *RedisCache) Delete(ctx context.Context, key string) error {
 	return c.client.Del(ctx, key).Err()
 }
