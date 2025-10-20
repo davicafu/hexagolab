@@ -13,8 +13,8 @@ import (
 	"github.com/google/uuid"
 
 	// --- Importaciones compartidas ---
-	sharedEvents "github.com/davicafu/hexagolab/shared/events"
-	sharedUtils "github.com/davicafu/hexagolab/shared/utils"
+	sharedEvents "github.com/davicafu/hexagolab/internal/shared/domain/events"
+	sharedUtils "github.com/davicafu/hexagolab/internal/shared/infra/utils"
 )
 
 // TaskService es la interfaz que define los métodos que el consumidor necesita.

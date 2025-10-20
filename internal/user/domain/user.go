@@ -3,7 +3,7 @@ package domain
 import (
 	"time"
 
-	sharedBus "github.com/davicafu/hexagolab/shared/platform/bus"
+	sharedBus "github.com/davicafu/hexagolab/internal/shared/infra/platform/bus"
 	"github.com/google/uuid"
 )
 

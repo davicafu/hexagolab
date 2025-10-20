@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/davicafu/hexagolab/internal/shared/domain/events"
 	userDomain "github.com/davicafu/hexagolab/internal/user/domain"
 	userConsumer "github.com/davicafu/hexagolab/internal/user/infra/inbound/events"
-	"github.com/davicafu/hexagolab/shared/events"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
@@ -80,7 +80,7 @@ func TestUserConsumer_HandleMessage(t *testing.T) {
 		Nombre:    "Ana",
 		BirthDate: time.Now().Add(-20 * 365 * 24 * time.Hour),
 	}
-	payload := buildEvent("UserCreated", createdEvent)
+	payload := buildEvent("user.created", createdEvent)
 	consumer.HandleMessage(ctx, "user.created", payload)
 
 	assert.Len(t, fakeService.Created, 1)
@@ -94,7 +94,7 @@ func TestUserConsumer_HandleMessage(t *testing.T) {
 		Nombre:    "Ana Updated",
 		BirthDate: fakeService.Created[0].BirthDate,
 	}
-	payload = buildEvent("UserUpdated", updatedEvent)
+	payload = buildEvent("user.updated", updatedEvent)
 	consumer.HandleMessage(ctx, "user.updated", payload)
 
 	assert.Len(t, fakeService.Updated, 1)
@@ -102,7 +102,7 @@ func TestUserConsumer_HandleMessage(t *testing.T) {
 	assert.Equal(t, "ana2@example.com", fakeService.Updated[0].Email)
 
 	// --- 3. Evento con payload malformado ---
-	badPayload := []byte(`{"Type": "UserCreated", "Data": "bad json"`)
+	badPayload := []byte(`{"Type": "user.created", "Data": "bad json"`)
 	consumer.HandleMessage(ctx, "user.created", badPayload)
 
 	// Nada nuevo debe haberse creado

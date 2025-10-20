@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	sharedDomain "github.com/davicafu/hexagolab/shared/domain"
+	sharedDomain "github.com/davicafu/hexagolab/internal/shared/domain"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"

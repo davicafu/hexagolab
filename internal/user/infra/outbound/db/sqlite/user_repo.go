@@ -12,10 +12,10 @@ import (
 	// _ "github.com/mattn/go-sqlite3" // better performance but requires gcc
 	_ "modernc.org/sqlite"
 
+	sharedDomain "github.com/davicafu/hexagolab/internal/shared/domain"
+	sharedQuery "github.com/davicafu/hexagolab/internal/shared/infra/platform/query"
+	sharedUtils "github.com/davicafu/hexagolab/internal/shared/infra/utils"
 	userDomain "github.com/davicafu/hexagolab/internal/user/domain"
-	sharedDomain "github.com/davicafu/hexagolab/shared/domain"
-	sharedQuery "github.com/davicafu/hexagolab/shared/platform/query"
-	sharedUtils "github.com/davicafu/hexagolab/shared/utils"
 )
 
 type UserRepoSQLite struct {

@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
+	sharedDomain "github.com/davicafu/hexagolab/internal/shared/domain"
+	sharedQuery "github.com/davicafu/hexagolab/internal/shared/infra/platform/query"
 	taskDomain "github.com/davicafu/hexagolab/internal/task/domain"
-	sharedDomain "github.com/davicafu/hexagolab/shared/domain"
-	sharedQuery "github.com/davicafu/hexagolab/shared/platform/query"
 	"github.com/google/uuid"
 )
 

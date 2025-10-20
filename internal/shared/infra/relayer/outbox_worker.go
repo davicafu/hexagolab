@@ -7,17 +7,17 @@ import (
 	"reflect"
 	"time"
 
-	sharedDomain "github.com/davicafu/hexagolab/shared/domain"
-	sharedEvents "github.com/davicafu/hexagolab/shared/events"
-	sharedBus "github.com/davicafu/hexagolab/shared/platform/bus"
+	sharedDomain "github.com/davicafu/hexagolab/internal/shared/domain"
+	sharedDomainEvents "github.com/davicafu/hexagolab/internal/shared/domain/events"
+	sharedBus "github.com/davicafu/hexagolab/internal/shared/infra/platform/bus"
 	"go.uber.org/zap"
 )
 
 // Worker procesa eventos pendientes de la tabla outbox de forma genérica.
 type Worker struct {
 	repo          sharedDomain.OutboxRepository
-	publisher     sharedBus.EventPublisher
-	eventRegistry map[string]sharedEvents.EventMetadata
+	publisher     sharedBus.EventBus
+	eventRegistry map[string]sharedDomainEvents.EventMetadata
 	interval      time.Duration
 	batchSize     int
 	log           *zap.Logger
@@ -25,8 +25,8 @@ type Worker struct {
 
 func NewOutboxWorker(
 	repo sharedDomain.OutboxRepository,
-	publisher sharedBus.EventPublisher,
-	registry map[string]sharedEvents.EventMetadata,
+	publisher sharedBus.EventBus,
+	registry map[string]sharedDomainEvents.EventMetadata,
 	interval time.Duration,
 	batchSize int,
 	log *zap.Logger,

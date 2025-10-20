@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
+	sharedDomain "github.com/davicafu/hexagolab/internal/shared/domain"
+	sharedQuery "github.com/davicafu/hexagolab/internal/shared/infra/platform/query"
 	userDomain "github.com/davicafu/hexagolab/internal/user/domain"
-	sharedDomain "github.com/davicafu/hexagolab/shared/domain"
-	sharedQuery "github.com/davicafu/hexagolab/shared/platform/query"
 	"github.com/google/uuid"
 )
 
@@ -339,70 +339,6 @@ func (r *InMemoryUserRepo) MarkOutboxProcessed(ctx context.Context, id uuid.UUID
 		}
 	}
 	return userDomain.ErrUserNotFound
-}
-
-// ------------------- Cache -------------------
-// DummyCache simula una cache en memoria
-type DummyCache struct {
-	store map[string]*userDomain.User
-	mu    sync.Mutex
-}
-
-// NewDummyCache crea un DummyCache inicializado
-func NewDummyCache() *DummyCache {
-	return &DummyCache{
-		store: make(map[string]*userDomain.User),
-	}
-}
-
-func (c *DummyCache) SetForTest(key string, u *userDomain.User) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.store == nil {
-		c.store = make(map[string]*userDomain.User)
-	}
-	c.store[key] = u
-}
-
-func (c *DummyCache) Get(ctx context.Context, key string, dest interface{}) (bool, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	u, ok := c.store[key]
-	if !ok {
-		return false, nil
-	}
-
-	userPtr, ok := dest.(*userDomain.User)
-	if !ok {
-		return false, nil
-	}
-
-	*userPtr = *u
-	return true, nil
-}
-
-func (c *DummyCache) Set(ctx context.Context, key string, val interface{}, ttlSecs int) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.store == nil {
-		c.store = make(map[string]*userDomain.User)
-	}
-
-	u, ok := val.(*userDomain.User)
-	if !ok {
-		return nil
-	}
-	c.store[key] = u
-	return nil
-}
-
-func (c *DummyCache) Delete(ctx context.Context, key string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.store, key)
-	return nil
 }
 
 // ------------------- EventPublisher -------------------

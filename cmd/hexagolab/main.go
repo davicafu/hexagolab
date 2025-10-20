@@ -7,10 +7,10 @@ import (
 	"time"
 
 	config "github.com/davicafu/hexagolab/internal/config"
-	"github.com/davicafu/hexagolab/internal/infra/db/postgres"
-	"github.com/davicafu/hexagolab/internal/infra/db/sqlite"
-	infraEvents "github.com/davicafu/hexagolab/internal/infra/events"
-	infraRelayer "github.com/davicafu/hexagolab/internal/infra/relayer"
+	infraEvents "github.com/davicafu/hexagolab/internal/shared/infra/events"
+	"github.com/davicafu/hexagolab/internal/shared/infra/platform/db/postgres"
+	"github.com/davicafu/hexagolab/internal/shared/infra/platform/db/sqlite"
+	infraRelayer "github.com/davicafu/hexagolab/internal/shared/infra/relayer"
 	taskApp "github.com/davicafu/hexagolab/internal/task/application"
 	taskDomain "github.com/davicafu/hexagolab/internal/task/domain"
 	taskEvents "github.com/davicafu/hexagolab/internal/task/infra/inbound/events"
@@ -24,10 +24,10 @@ import (
 	userRepo "github.com/davicafu/hexagolab/internal/user/infra/outbound/db/sqlite"
 	"github.com/google/uuid"
 
+	sharedEvents "github.com/davicafu/hexagolab/internal/shared/domain/events"
+	sharedBus "github.com/davicafu/hexagolab/internal/shared/infra/platform/bus"
+	sharedCache "github.com/davicafu/hexagolab/internal/shared/infra/platform/cache"
 	"github.com/davicafu/hexagolab/pkg/logger"
-	sharedEvents "github.com/davicafu/hexagolab/shared/events"
-	sharedBus "github.com/davicafu/hexagolab/shared/platform/bus"
-	sharedCache "github.com/davicafu/hexagolab/shared/platform/cache"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
@@ -82,8 +82,8 @@ func main() {
 	taskService := taskApp.NewTaskService(taskRepoPostgres, cacheInstance, log)
 
 	// ---------------- Events ---------------
-	var eventUserPublisher sharedBus.EventPublisher
-	var eventTaskPublisher sharedBus.EventPublisher
+	var eventUserPublisher sharedBus.EventBus
+	var eventTaskPublisher sharedBus.EventBus
 
 	if cfg.UseKafka {
 		log.Info("🚀 Usando Kafka como bus de eventos")

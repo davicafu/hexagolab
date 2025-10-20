@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	sharedDomain "github.com/davicafu/hexagolab/internal/shared/domain"
+	sharedQuery "github.com/davicafu/hexagolab/internal/shared/infra/platform/query"
 	taskDomain "github.com/davicafu/hexagolab/internal/task/domain"
-	sharedDomain "github.com/davicafu/hexagolab/shared/domain"
-	sharedQuery "github.com/davicafu/hexagolab/shared/platform/query"
 	"github.com/davicafu/hexagolab/tests/mocks" // Importamos nuestros mocks/fakes
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -22,7 +22,7 @@ import (
 func TestCreateTask_Success(t *testing.T) {
 	// Arrange
 	repo := mocks.NewInMemoryTaskRepo()
-	cache := &mocks.DummyCache{}
+	cache := mocks.NewDummyCache()
 	service := NewTaskService(repo, cache, zap.NewNop())
 	assigneeID := uuid.New()
 
@@ -44,7 +44,7 @@ func TestCreateTask_Success(t *testing.T) {
 func TestGetTask_NotFound(t *testing.T) {
 	// Arrange
 	repo := mocks.NewInMemoryTaskRepo()
-	cache := &mocks.DummyCache{}
+	cache := mocks.NewDummyCache()
 	service := NewTaskService(repo, cache, zap.NewNop())
 
 	// Act
@@ -57,7 +57,7 @@ func TestGetTask_NotFound(t *testing.T) {
 func TestUpdateTask_Success(t *testing.T) {
 	// Arrange
 	repo := mocks.NewInMemoryTaskRepo()
-	cache := &mocks.DummyCache{}
+	cache := mocks.NewDummyCache()
 	service := NewTaskService(repo, cache, zap.NewNop())
 
 	task, _ := service.CreateTask(context.Background(), "Tarea original", "desc", uuid.New())
@@ -83,7 +83,7 @@ func TestUpdateTask_Success(t *testing.T) {
 func TestDeleteTask_Success(t *testing.T) {
 	// Arrange
 	repo := mocks.NewInMemoryTaskRepo()
-	cache := &mocks.DummyCache{}
+	cache := mocks.NewDummyCache()
 	service := NewTaskService(repo, cache, zap.NewNop())
 	task, _ := service.CreateTask(context.Background(), "Tarea a borrar", "desc", uuid.New())
 
@@ -111,7 +111,7 @@ func TestGetTask_CacheHit(t *testing.T) {
 
 	// Pre-populamos la caché directamente
 	repo := mocks.NewInMemoryTaskRepo()
-	cache := &mocks.DummyCache{}
+	cache := mocks.NewDummyCache()
 	cache.Set(context.Background(), taskDomain.TaskCacheKeyByID(taskID), task, 60)
 
 	service := NewTaskService(repo, cache, zap.NewNop())
@@ -132,7 +132,7 @@ func TestGetTask_CacheMiss(t *testing.T) {
 
 	repo := mocks.NewInMemoryTaskRepo()
 	repo.Create(context.Background(), task, sharedDomain.OutboxEvent{}) // Pre-populamos el repo
-	cache := &mocks.DummyCache{}                                        // La caché está vacía
+	cache := mocks.NewDummyCache()                                      // La caché está vacía
 
 	service := NewTaskService(repo, cache, zap.NewNop())
 
@@ -145,9 +145,11 @@ func TestGetTask_CacheMiss(t *testing.T) {
 	assert.Equal(t, task.ID, fetchedTask.ID)
 
 	// Verificar que la caché se ha actualizado
-	var cachedTask taskDomain.Task
-	hit, _ := cache.Get(context.Background(), taskDomain.TaskCacheKeyByID(taskID), &cachedTask)
-	assert.True(t, hit, "La caché debería haberse populado tras el 'miss'")
+	assert.Eventually(t, func() bool {
+		var cachedTask taskDomain.Task
+		hit, _ := cache.Get(context.Background(), taskDomain.TaskCacheKeyByID(taskID), &cachedTask)
+		return hit // La condición se cumple cuando 'hit' es true
+	}, 1*time.Second, 10*time.Millisecond, "La caché debería haberse populado tras el 'miss'")
 }
 
 // ----------------- ListTasks / Search / Filter -----------------

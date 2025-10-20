@@ -9,9 +9,9 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	sharedEvents "github.com/davicafu/hexagolab/internal/shared/domain/events"
+	sharedUtils "github.com/davicafu/hexagolab/internal/shared/infra/utils"
 	userDomain "github.com/davicafu/hexagolab/internal/user/domain"
-	sharedEvents "github.com/davicafu/hexagolab/shared/events"
-	sharedUtils "github.com/davicafu/hexagolab/shared/utils"
 )
 
 type UserEvent struct {

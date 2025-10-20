@@ -8,10 +8,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	sharedDomain "github.com/davicafu/hexagolab/internal/shared/domain"
+	sharedQuery "github.com/davicafu/hexagolab/internal/shared/infra/platform/query"
 	"github.com/davicafu/hexagolab/internal/task/application"
 	taskDomain "github.com/davicafu/hexagolab/internal/task/domain"
-	sharedDomain "github.com/davicafu/hexagolab/shared/domain"
-	sharedQuery "github.com/davicafu/hexagolab/shared/platform/query"
 )
 
 // TaskHandler encapsula los endpoints HTTP relacionados con Task.

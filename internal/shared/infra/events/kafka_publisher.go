@@ -8,7 +8,7 @@ import (
 
 	"github.com/segmentio/kafka-go"
 
-	sharedBus "github.com/davicafu/hexagolab/shared/platform/bus"
+	sharedBus "github.com/davicafu/hexagolab/internal/shared/infra/platform/bus"
 )
 
 type KafkaPublisher struct {
@@ -46,4 +46,4 @@ func (p *KafkaPublisher) Publish(ctx context.Context, event interface{}) error {
 }
 
 // Verificación estática
-var _ sharedBus.EventPublisher = (*KafkaPublisher)(nil)
+var _ sharedBus.EventBus = (*KafkaPublisher)(nil)

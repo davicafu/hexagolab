@@ -7,6 +7,6 @@ type Keyer interface {
 }
 
 // La semántica de topic/nombre y formato del payload la decides en los adapters.
-type EventPublisher interface {
+type EventBus interface {
 	Publish(ctx context.Context, event interface{}) error
 }

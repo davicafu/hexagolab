@@ -6,10 +6,10 @@ import (
 	"reflect"
 	"testing"
 
+	sharedDomain "github.com/davicafu/hexagolab/internal/shared/domain"
+	sharedDomainEvents "github.com/davicafu/hexagolab/internal/shared/domain/events"
+	sharedBus "github.com/davicafu/hexagolab/internal/shared/infra/platform/bus"
 	userDomain "github.com/davicafu/hexagolab/internal/user/domain"
-	sharedDomain "github.com/davicafu/hexagolab/shared/domain"
-	sharedEvents "github.com/davicafu/hexagolab/shared/events"
-	sharedBus "github.com/davicafu/hexagolab/shared/platform/bus"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
@@ -30,7 +30,7 @@ func TestOutboxWorker_ProcessBatch_Success(t *testing.T) {
 	}
 
 	// ✅ Creamos el registro con el struct EventMetadata correcto.
-	registry := map[string]sharedEvents.EventMetadata{
+	registry := map[string]sharedDomainEvents.EventMetadata{
 		userDomain.UserCreated: {
 			Type:  reflect.TypeOf(userDomain.User{}),
 			Topic: userDomain.UserTopic,
@@ -60,7 +60,7 @@ func TestOutboxWorker_ProcessBatch_PublisherFails(t *testing.T) {
 	eventID := uuid.New()
 	testEvent := sharedDomain.OutboxEvent{ID: eventID, EventType: userDomain.UserCreated, Payload: map[string]interface{}{}}
 
-	registry := map[string]sharedEvents.EventMetadata{
+	registry := map[string]sharedDomainEvents.EventMetadata{
 		userDomain.UserCreated: {
 			Type:  reflect.TypeOf(userDomain.User{}),
 			Topic: userDomain.UserTopic,
@@ -89,7 +89,7 @@ func TestOutboxWorker_ProcessBatch_UnknownEventType(t *testing.T) {
 
 	testEvent := sharedDomain.OutboxEvent{ID: uuid.New(), EventType: "unregistered.event", Payload: map[string]interface{}{}}
 
-	registry := make(map[string]sharedEvents.EventMetadata) // Registro vacío
+	registry := make(map[string]sharedDomainEvents.EventMetadata) // Registro vacío
 
 	repo.On("FetchPendingOutbox", mock.Anything, 10).Return([]sharedDomain.OutboxEvent{testEvent}, nil).Once()
 
@@ -106,4 +106,4 @@ func TestOutboxWorker_ProcessBatch_UnknownEventType(t *testing.T) {
 
 // Verificación estática de que los mocks cumplen las interfaces.
 var _ sharedDomain.OutboxRepository = (*mocks.MockOutboxRepository)(nil)
-var _ sharedBus.EventPublisher = (*mocks.MockPublisher)(nil)
+var _ sharedBus.EventBus = (*mocks.MockPublisher)(nil)

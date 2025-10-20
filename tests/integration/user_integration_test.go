@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
+	sharedDomain "github.com/davicafu/hexagolab/internal/shared/domain"
+	sharedQuery "github.com/davicafu/hexagolab/internal/shared/infra/platform/query"
 	userDomain "github.com/davicafu/hexagolab/internal/user/domain"
 	"github.com/davicafu/hexagolab/internal/user/infra/outbound/db/sqlite"
-	sharedDomain "github.com/davicafu/hexagolab/shared/domain"
-	sharedQuery "github.com/davicafu/hexagolab/shared/platform/query"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

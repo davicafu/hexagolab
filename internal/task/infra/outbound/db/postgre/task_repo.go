@@ -9,10 +9,10 @@ import (
 	"time"
 
 	// --- Importaciones del dominio y compartidas ---
+	sharedDomain "github.com/davicafu/hexagolab/internal/shared/domain"
+	sharedQuery "github.com/davicafu/hexagolab/internal/shared/infra/platform/query"
+	sharedUtils "github.com/davicafu/hexagolab/internal/shared/infra/utils"
 	taskDomain "github.com/davicafu/hexagolab/internal/task/domain"
-	sharedDomain "github.com/davicafu/hexagolab/shared/domain"
-	sharedQuery "github.com/davicafu/hexagolab/shared/platform/query"
-	sharedUtils "github.com/davicafu/hexagolab/shared/utils"
 
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib" // Driver de PostgreSQL

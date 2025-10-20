@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"sync"
 
-	sharedBus "github.com/davicafu/hexagolab/shared/platform/bus"
+	sharedBus "github.com/davicafu/hexagolab/internal/shared/infra/platform/bus"
 )
 
 // InMemoryEventBus implementa un bus de eventos para UN solo topic.
@@ -18,7 +18,7 @@ type InMemoryEventBus struct {
 }
 
 // Verifica en tiempo de compilación que cumple la interfaz
-var _ sharedBus.EventPublisher = (*InMemoryEventBus)(nil)
+var _ sharedBus.EventBus = (*InMemoryEventBus)(nil)
 
 // NewInMemoryEventBus crea un bus de eventos para un topic específico.
 func NewInMemoryEventBus(topic string) *InMemoryEventBus {

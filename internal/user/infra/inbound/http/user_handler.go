@@ -8,11 +8,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	sharedDomain "github.com/davicafu/hexagolab/internal/shared/domain"
+	sharedQuery "github.com/davicafu/hexagolab/internal/shared/infra/platform/query"
 	"github.com/davicafu/hexagolab/internal/user/application"
 	userDomain "github.com/davicafu/hexagolab/internal/user/domain"
 	response "github.com/davicafu/hexagolab/pkg/utils"
-	sharedDomain "github.com/davicafu/hexagolab/shared/domain"
-	sharedQuery "github.com/davicafu/hexagolab/shared/platform/query"
 )
 
 // UserHandler encapsula los endpoints HTTP relacionados con User

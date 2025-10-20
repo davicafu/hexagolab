@@ -5,11 +5,11 @@ import (
 	"errors"
 	"time"
 
+	sharedDomain "github.com/davicafu/hexagolab/internal/shared/domain"
+	sharedCache "github.com/davicafu/hexagolab/internal/shared/infra/platform/cache"
+	sharedQuery "github.com/davicafu/hexagolab/internal/shared/infra/platform/query"
+	sharedUtils "github.com/davicafu/hexagolab/internal/shared/infra/utils"
 	userDomain "github.com/davicafu/hexagolab/internal/user/domain"
-	sharedDomain "github.com/davicafu/hexagolab/shared/domain"
-	sharedCache "github.com/davicafu/hexagolab/shared/platform/cache"
-	sharedQuery "github.com/davicafu/hexagolab/shared/platform/query"
-	sharedUtils "github.com/davicafu/hexagolab/shared/utils"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )

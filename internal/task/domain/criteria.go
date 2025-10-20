@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	// Importamos el "sistema" de Criterios genérico y le damos un alias
-	shared "github.com/davicafu/hexagolab/shared/domain"
+	shared "github.com/davicafu/hexagolab/internal/shared/domain"
 )
 
 // --- Criterios Específicos para el Dominio Task ---

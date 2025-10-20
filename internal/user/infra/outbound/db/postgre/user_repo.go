@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"strings"
 
+	sharedDomain "github.com/davicafu/hexagolab/internal/shared/domain"
+	sharedQuery "github.com/davicafu/hexagolab/internal/shared/infra/platform/query"
+	sharedUtils "github.com/davicafu/hexagolab/internal/shared/infra/utils"
 	userDomain "github.com/davicafu/hexagolab/internal/user/domain"
-	sharedDomain "github.com/davicafu/hexagolab/shared/domain"
-	sharedQuery "github.com/davicafu/hexagolab/shared/platform/query"
-	sharedUtils "github.com/davicafu/hexagolab/shared/utils"
 	"github.com/google/uuid"
 
 	_ "github.com/jackc/pgx/v5/stdlib"

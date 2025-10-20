@@ -3,7 +3,7 @@ package domain
 import (
 	"reflect"
 
-	sharedEvents "github.com/davicafu/hexagolab/shared/events"
+	sharedEvents "github.com/davicafu/hexagolab/internal/shared/domain/events"
 )
 
 // Las constantes de los tipos de evento se definen aquí, como valores string.

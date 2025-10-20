@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
+	sharedDomain "github.com/davicafu/hexagolab/internal/shared/domain"
+	"github.com/davicafu/hexagolab/internal/shared/domain/events"
 	"github.com/davicafu/hexagolab/internal/user/application"
 	userDomain "github.com/davicafu/hexagolab/internal/user/domain"
-	sharedDomain "github.com/davicafu/hexagolab/shared/domain"
-	"github.com/davicafu/hexagolab/shared/events"
 	"github.com/davicafu/hexagolab/tests/mocks"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -30,7 +30,7 @@ type userHTTPResponse struct {
 func TestGetUser_HTTPContract(t *testing.T) {
 	// Mock repository que simula un usuario existente
 	repo := mocks.NewInMemoryUserRepo()
-	cache := &mocks.DummyCache{}
+	cache := mocks.NewDummyCache()
 
 	service := application.NewUserService(repo, cache, zap.NewNop())
 

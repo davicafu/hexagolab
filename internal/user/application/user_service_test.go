@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	sharedDomain "github.com/davicafu/hexagolab/internal/shared/domain"
+	sharedQuery "github.com/davicafu/hexagolab/internal/shared/infra/platform/query"
 	userDomain "github.com/davicafu/hexagolab/internal/user/domain"
-	sharedDomain "github.com/davicafu/hexagolab/shared/domain"
-	sharedQuery "github.com/davicafu/hexagolab/shared/platform/query"
 	"github.com/davicafu/hexagolab/tests/mocks"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -17,7 +17,7 @@ import (
 
 func TestCreateUser_Success(t *testing.T) {
 	repo := mocks.NewInMemoryUserRepo()
-	cache := &mocks.DummyCache{}
+	cache := mocks.NewDummyCache()
 	service := NewUserService(repo, cache, zap.NewNop())
 
 	user, err := service.CreateUser(context.Background(), "test@example.com", "Pepe", time.Date(1990, 5, 10, 0, 0, 0, 0, time.UTC))
@@ -34,7 +34,7 @@ func TestCreateUser_Success(t *testing.T) {
 
 func TestCreateUser_AlreadyExists(t *testing.T) {
 	repo := mocks.NewInMemoryUserRepo()
-	cache := &mocks.DummyCache{}
+	cache := mocks.NewDummyCache()
 	service := NewUserService(repo, cache, zap.NewNop())
 
 	user, _ := service.CreateUser(context.Background(), "dup@example.com", "Juan", time.Now())
@@ -52,7 +52,7 @@ func TestCreateUser_AlreadyExists(t *testing.T) {
 
 func TestGetUser_NotFound(t *testing.T) {
 	repo := mocks.NewInMemoryUserRepo()
-	cache := &mocks.DummyCache{}
+	cache := mocks.NewDummyCache()
 	service := NewUserService(repo, cache, zap.NewNop())
 
 	_, err := service.GetUser(context.Background(), uuid.New())
@@ -61,7 +61,7 @@ func TestGetUser_NotFound(t *testing.T) {
 
 func TestUpdateUser_Success(t *testing.T) {
 	repo := mocks.NewInMemoryUserRepo()
-	cache := &mocks.DummyCache{}
+	cache := mocks.NewDummyCache()
 	service := NewUserService(repo, cache, zap.NewNop())
 
 	user, _ := service.CreateUser(context.Background(), "update@example.com", "Ana", time.Now())
@@ -82,7 +82,7 @@ func TestUpdateUser_Success(t *testing.T) {
 
 func TestDeleteUser_Success(t *testing.T) {
 	repo := mocks.NewInMemoryUserRepo()
-	cache := &mocks.DummyCache{}
+	cache := mocks.NewDummyCache()
 	service := NewUserService(repo, cache, zap.NewNop())
 
 	user, _ := service.CreateUser(context.Background(), "delete@example.com", "Borrar", time.Now())
@@ -110,7 +110,7 @@ func TestGetUser_CacheHit(t *testing.T) {
 	}
 
 	cache := mocks.NewDummyCache()
-	cache.SetForTest(userDomain.UserCacheKeyByID(id), user) // método de test que inserta directamente
+	cache.Set(context.Background(), userDomain.UserCacheKeyByID(id), user, 60)
 
 	repo := mocks.NewInMemoryUserRepo()
 	service := NewUserService(repo, cache, zap.NewNop())
@@ -135,9 +135,16 @@ func TestGetUser_CacheMiss(t *testing.T) {
 
 	service := NewUserService(repo, cache, zap.NewNop())
 
-	u, _ := service.GetUser(context.Background(), id)
+	u, err := service.GetUser(context.Background(), id)
+	assert.NoError(t, err)
 	assert.NotNil(t, u)
 	assert.Equal(t, id, u.ID)
+
+	assert.Eventually(t, func() bool {
+		var cachedUser userDomain.User
+		hit, _ := cache.Get(context.Background(), userDomain.UserCacheKeyByID(id), &cachedUser)
+		return hit
+	}, 1*time.Second, 10*time.Millisecond, "La caché de usuario debería haberse populado tras el 'miss'")
 }
 
 // ----------------- ListUsers / Search / Filter -----------------
@@ -169,7 +176,7 @@ func TestListUsersByName(t *testing.T) {
 
 func TestListUsers(t *testing.T) {
 	repo := mocks.NewInMemoryUserRepo()
-	cache := &mocks.DummyCache{}
+	cache := mocks.NewDummyCache()
 	service := NewUserService(repo, cache, zap.NewNop())
 
 	user1, _ := service.CreateUser(context.Background(), "a@example.com", "Ana", time.Now())
@@ -191,7 +198,7 @@ func TestListUsers(t *testing.T) {
 
 func TestListAdultUsers(t *testing.T) {
 	repo := mocks.NewInMemoryUserRepo()
-	cache := &mocks.DummyCache{}
+	cache := mocks.NewDummyCache()
 	service := NewUserService(repo, cache, zap.NewNop())
 
 	// Crear usuarios de distintas edades

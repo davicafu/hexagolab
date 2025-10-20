@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/davicafu/hexagolab/shared/domain"
+	"github.com/davicafu/hexagolab/internal/shared/domain"
 	"github.com/google/uuid"
 )
 
