@@ -112,3 +112,6 @@ make unit-test
 
 # Generate and open the coverage report
 make coverage-html
+
+# build all binaries
+make build
